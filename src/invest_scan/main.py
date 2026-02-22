@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from starlette.middleware.gzip import GZipMiddleware
 
 from invest_scan import db
 from invest_scan.api import router
@@ -24,6 +25,11 @@ def create_app(
             headers={"user-agent": "invest-scan-mvp/0.1"},
             follow_redirects=True,
             transport=transport,
+            limits=httpx.Limits(
+                max_connections=max(10, settings_obj.max_concurrent_fetches * 4),
+                max_keepalive_connections=max(10, settings_obj.max_concurrent_fetches * 2),
+                keepalive_expiry=30.0,
+            ),
         )
         app.state.settings = settings_obj
         app.state.http = http
@@ -34,6 +40,7 @@ def create_app(
             await http.aclose()
 
     app = FastAPI(title="Investment Scan MVP", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(GZipMiddleware, minimum_size=1500)
     app.include_router(router)
     return app
 
