@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -52,7 +52,7 @@ GET  /scans
 
 @router.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "service": "invest-scan", "time": datetime.utcnow().isoformat()}
+    return {"ok": True, "service": "invest-scan", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @router.post("/scan", response_model=ScanCreateResponse)

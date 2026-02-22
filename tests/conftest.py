@@ -58,7 +58,8 @@ def app(tmp_path: Path):
 
 @pytest.fixture()
 async def client(app) -> httpx.AsyncClient:
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
 
