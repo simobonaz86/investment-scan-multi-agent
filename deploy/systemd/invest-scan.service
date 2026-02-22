@@ -1,0 +1,15 @@
+[Unit]
+Description=Investment Scan MVP API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/invest-scan
+EnvironmentFile=/opt/invest-scan/.env
+ExecStart=/opt/invest-scan/.venv/bin/uvicorn invest_scan.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+
