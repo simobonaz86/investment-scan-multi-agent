@@ -50,7 +50,7 @@ docker compose up -d --build
 docker compose logs -f api
 ```
 
-Service listens on port `8000` by default.
+Service listens on port `8000` by default. Data is persisted via a named Docker volume (`invest_scan_data`).
 
 ## Tests
 

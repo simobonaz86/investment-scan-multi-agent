@@ -11,6 +11,7 @@ COPY src /app/src
 RUN pip install -U pip && pip install .
 
 RUN useradd -m appuser
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
