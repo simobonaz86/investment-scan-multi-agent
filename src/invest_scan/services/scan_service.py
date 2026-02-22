@@ -63,10 +63,13 @@ class ScanService:
 
         async def one(ticker: str) -> dict[str, Any]:
             try:
-                market, closes = await self._get_market(ticker)
+                market_task = asyncio.create_task(self._get_market(ticker))
+                news_task = asyncio.create_task(self._get_news(ticker))
+
+                market, closes = await market_task
                 signals = self._signals.analyze(closes)
                 risk = self._risk.score(volatility_60d_ann=market.get("volatility_60d_ann"))
-                news = await self._get_news(ticker)
+                news = await news_task
                 report = {
                     "ticker": ticker,
                     "market": market,
