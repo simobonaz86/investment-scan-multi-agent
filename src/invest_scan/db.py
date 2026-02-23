@@ -32,6 +32,45 @@ async def init_db(db_path: str) -> None:
             """
         )
         await db.execute("CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at)")
+
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_account (
+              account_id TEXT PRIMARY KEY,
+              cash_usd REAL NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_position (
+              account_id TEXT NOT NULL,
+              ticker TEXT NOT NULL,
+              quantity REAL NOT NULL,
+              avg_price REAL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY (account_id, ticker)
+            )
+            """
+        )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_trade (
+              trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              account_id TEXT NOT NULL,
+              trade_date TEXT,
+              instrument TEXT NOT NULL,
+              side TEXT NOT NULL,
+              quantity REAL NOT NULL,
+              price REAL,
+              total REAL
+            )
+            """
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_portfolio_trade_account_date ON portfolio_trade(account_id, trade_date)"
+        )
         await db.commit()
 
 

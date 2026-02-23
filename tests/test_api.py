@@ -12,6 +12,10 @@ async def test_health(client):
 
 
 async def test_scan_flow(client):
+    # Ensure cash is set so trade_plan can be computed
+    r_cash = await client.post("/portfolio/cash", json={"cash_usd": 10000})
+    assert r_cash.status_code == 200
+
     r = await client.post("/scan", json={"tickers": ["AAPL"], "as_of": "auto"})
     assert r.status_code == 200
     scan_id = UUID(r.json()["scan_id"])
@@ -31,4 +35,5 @@ async def test_scan_flow(client):
     assert scan["result"]["tickers"] == ["AAPL"]
     assert len(scan["result"]["reports"]) == 1
     assert scan["result"]["reports"][0]["ticker"] == "AAPL"
+    assert scan["result"]["reports"][0]["trade_plan"]["enabled"] is True
 

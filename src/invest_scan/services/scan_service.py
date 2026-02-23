@@ -11,6 +11,7 @@ import httpx
 from invest_scan import db
 from invest_scan.agents import MarketDataAgent, NewsAgent, RiskAgent, SignalsAgent, SummaryAgent
 from invest_scan.settings import Settings
+from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.ttl_cache import TTLCache
 
 
@@ -19,9 +20,16 @@ def _utcnow_iso() -> str:
 
 
 class ScanService:
-    def __init__(self, *, settings: Settings, http: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        http: httpx.AsyncClient,
+        portfolio_service: PortfolioService | None = None,
+    ) -> None:
         self._settings = settings
         self._http = http
+        self._portfolio = portfolio_service
 
         self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
         self._market = MarketDataAgent(http)
@@ -61,6 +69,13 @@ class ScanService:
         tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
         tickers = list(dict.fromkeys(tickers))[:30]
 
+        cash_usd: float | None = None
+        if self._portfolio is not None:
+            try:
+                cash_usd = (await self._portfolio.get_portfolio()).cash_usd
+            except Exception:
+                cash_usd = None
+
         async def one(ticker: str) -> dict[str, Any]:
             try:
                 market_task = asyncio.create_task(self._get_market(ticker))
@@ -71,11 +86,20 @@ class ScanService:
                 signals = self._signals.analyze(closes, market=market)
                 risk = self._risk.score(volatility_60d_ann=market.get("volatility_60d_ann"))
                 news = await news_task
+                trade_plan = self._risk.plan_trade(
+                    cash_usd=cash_usd,
+                    entry_price=market.get("last_close"),
+                    atr14=market.get("atr14"),
+                    risk_per_trade_pct=self._settings.risk_per_trade_pct,
+                    stop_atr_multiple=self._settings.stop_atr_multiple,
+                    min_position_usd=self._settings.min_position_usd,
+                )
                 report = {
                     "ticker": ticker,
                     "market": market,
                     "signals": signals,
                     "risk": risk,
+                    "trade_plan": trade_plan,
                     "news": news,
                 }
                 report["summary"] = self._summary.summarize(report)

@@ -11,6 +11,7 @@ from invest_scan import db
 from invest_scan.autoscan import autoscan_loop
 from invest_scan.api import router
 from invest_scan.settings import Settings, settings
+from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
 
@@ -36,8 +37,11 @@ def create_app(
         )
         app.state.settings = settings_obj
         app.state.http = http
-        app.state.scan_service = ScanService(settings=settings_obj, http=http)
         app.state.ranking_service = RankingService(settings=settings_obj, http=http)
+        app.state.portfolio_service = PortfolioService(settings=settings_obj)
+        app.state.scan_service = ScanService(
+            settings=settings_obj, http=http, portfolio_service=app.state.portfolio_service
+        )
         autoscan_task: asyncio.Task | None = None
         if settings_obj.autoscan_enabled:
             autoscan_task = asyncio.create_task(autoscan_loop(app))

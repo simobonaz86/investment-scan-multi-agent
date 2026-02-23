@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     sp500_universe_path: str = "data/sp500_tickers.txt"
     sp500_ranking_max_tickers: int = 200
 
+    # Position sizing (MVP)
+    risk_per_trade_pct: float = 0.01
+    stop_atr_multiple: float = 2.0
+    min_position_usd: float = 100.0
+
 
 settings = Settings()
 

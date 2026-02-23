@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from invest_scan import db
@@ -92,4 +92,37 @@ async def sp500_weekly_ranking(request: Request) -> dict[str, Any]:
         universe_path=settings.sp500_universe_path,
         max_tickers=settings.sp500_ranking_max_tickers,
     )
+
+
+@router.get("/portfolio")
+async def get_portfolio(request: Request) -> dict[str, Any]:
+    p = await request.app.state.portfolio_service.get_portfolio()
+    return {"account_id": p.account_id, "cash_usd": p.cash_usd, "positions": p.positions}
+
+
+@router.post("/portfolio/cash")
+async def set_cash(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    cash = body.get("cash_usd")
+    if cash is None:
+        raise HTTPException(status_code=400, detail="missing_cash_usd")
+    try:
+        cash_f = float(cash)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_cash_usd")
+    await request.app.state.portfolio_service.set_cash_usd(cash_f)
+    return {"ok": True, "cash_usd": max(0.0, cash_f)}
+
+
+@router.post("/portfolio/revolut/upload")
+async def upload_revolut_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    mode: str = "auto",
+) -> dict[str, Any]:
+    content = await file.read()
+    try:
+        parsed = await request.app.state.portfolio_service.import_revolut_csv(content, mode=mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **parsed}
 

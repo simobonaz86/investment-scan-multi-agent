@@ -20,7 +20,11 @@ def _make_stooq_csv(days: int = 120) -> str:
         # simple upward drift, skip weekends not needed for MVP math
         price = price * (1.0 + (0.001 if i % 5 else -0.0005))
         close = round(price, 4)
-        lines.append(f"{day.isoformat()},1,1,1,{close},0")
+        # Create realistic OHLC around close so ATR isn't enormous.
+        open_ = round(close * 0.997, 4)
+        high = round(close * 1.005, 4)
+        low = round(close * 0.995, 4)
+        lines.append(f"{day.isoformat()},{open_},{high},{low},{close},1000000")
     return "\n".join(lines) + "\n"
 
 
