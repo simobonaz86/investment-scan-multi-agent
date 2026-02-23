@@ -7,6 +7,7 @@ const state = {
   dashboardAt: 0,
   portfolio: null,
   portfolioAt: 0,
+  signalsById: new Map(),
   signalsAt: 0,
   scansAt: 0,
   positionsAt: 0,
@@ -133,6 +134,10 @@ function plainEnglishReason(rec, cashUsd) {
 
   const lines = [];
   lines.push(`BUY ${t}.`);
+  if (rec.strategy) {
+    if (rec.strategy === "momentum") lines.push("Style: momentum (trend-following).");
+    if (rec.strategy === "reversion") lines.push("Style: mean reversion (bounce from oversold).");
+  }
   if (reasons.length) lines.push(`Why: ${reasons.join("; ")}.`);
   if (entry > 0 && stop > 0 && take > 0) {
     lines.push(
@@ -140,6 +145,9 @@ function plainEnglishReason(rec, cashUsd) {
     );
   }
   if (shares > 0) lines.push(`Sizing: ${shares} shares (~${fmtMoney(notional)} notional), max loss ~${fmtMoney(maxLoss)}.`);
+  if (entry > 0 && stop > 0) {
+    lines.push("Invalidation: if price hits the stop, the setup is wrong—exit or reassess.");
+  }
   if (overBudget && fitShares != null) {
     lines.push(
       `Over budget: this uses ${fmtMoney(notional)} but you have ${fmtMoney(cashUsd)} cash. To fit, reduce to ~${fitShares} shares.`,
@@ -148,8 +156,26 @@ function plainEnglishReason(rec, cashUsd) {
   return lines.join(" ");
 }
 
+function getSkippedSignalIds() {
+  try {
+    const raw = localStorage.getItem("skippedSignals") || "[]";
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function addSkippedSignalId(id) {
+  const s = getSkippedSignalIds();
+  s.add(String(id));
+  localStorage.setItem("skippedSignals", JSON.stringify(Array.from(s).slice(-500)));
+}
+
 function renderSignalCards(recs, { cashUsd = null } = {}) {
+  const skipped = getSkippedSignalIds();
   return recs
+    .filter((r) => !skipped.has(String(r.rec_id)))
     .map((r) => {
       const tag = (r.strategy || "manual").toLowerCase();
       const expiresIn = fmtCountdown(msUntil(r.expires_at));
@@ -327,6 +353,7 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
             cash_after: cashAfter,
             cash_valid: cashAfter >= 0,
             expires_at: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+            created_at: new Date().toISOString(),
           };
         });
       }
@@ -347,80 +374,8 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
   }
 
   out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0) });
+  state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
   state.signalsAt = now;
-
-  document.querySelectorAll("[data-skip]").forEach((b) => {
-    b.addEventListener("click", async () => {
-      const id = b.getAttribute("data-skip");
-      b.disabled = true;
-      try {
-        if (String(id).startsWith("cand:")) return;
-        await apiJson(`/api/recommendations/${encodeURIComponent(id)}/skip`, { method: "POST", body: "{}" });
-        await loadSignals();
-      } catch (e) {
-        alert(e.message);
-      } finally {
-        b.disabled = false;
-      }
-    });
-  });
-
-  document.querySelectorAll("[data-exec]").forEach((b) => {
-    b.addEventListener("click", async () => {
-      const id = b.getAttribute("data-exec");
-      const card = document.querySelector(`[data-rec="${CSS.escape(id)}"]`);
-      const rec = recs.find((x) => x.rec_id === id);
-      if (!rec) return;
-      const overBudget = rec.cash_valid === false || Number(rec.cash_after || 0) < 0;
-      const hint = overBudget
-        ? `<div class="pill bad" style="display:inline-block;margin-top:8px;">Over budget — reduce shares to fit cash.</div>`
-        : "";
-      const bodyHtml = `
-        <div class="subtle">Adjust entry and shares if needed, then confirm.</div>
-        ${hint}
-        <div style="height:10px"></div>
-        <label class="label">Entry price</label>
-        <input id="mEntry" class="input" type="number" step="0.01" inputmode="decimal" value="${rec.entry_price ?? ""}" />
-        <div style="height:10px"></div>
-        <label class="label">Shares</label>
-        <input id="mShares" class="input" type="number" step="1" inputmode="numeric" value="${rec.shares ?? ""}" />
-      `;
-      const res = await confirmDialog({ title: `Execute ${rec.ticker}`, bodyHtml, okText: "Execute" });
-      if (res !== "ok") return;
-      const entry = parseFloat(el("mEntry").value || "0");
-      const shares = parseFloat(el("mShares").value || "0");
-      b.disabled = true;
-      if (card) card.style.opacity = "0.7";
-      try {
-        if (String(id).startsWith("cand:")) {
-          await apiJson("/api/trade/execute", {
-            method: "POST",
-            body: JSON.stringify({
-              ticker: rec.ticker,
-              entry_price: entry,
-              shares,
-              stop_loss: rec.stop_loss,
-              take_profit: rec.take_profit,
-              strategy: rec.strategy,
-              reason: (rec.reasons || []).join("; "),
-            }),
-          });
-        } else {
-          await apiJson(`/api/recommendations/${encodeURIComponent(id)}/execute`, {
-            method: "POST",
-            body: JSON.stringify({ entry_price: entry, shares }),
-          });
-        }
-        state.dashboardAt = 0;
-        await refreshVisible({ force: true });
-      } catch (e) {
-        alert(e.message);
-      } finally {
-        b.disabled = false;
-        if (card) card.style.opacity = "";
-      }
-    });
-  });
 }
 
 async function loadScans({ dashboard = null, force = false } = {}) {
@@ -724,6 +679,88 @@ async function main() {
     });
   });
 
+  el("signalCards").addEventListener("click", async (evt) => {
+    const execBtn = evt.target.closest("[data-exec]");
+    const skipBtn = evt.target.closest("[data-skip]");
+    if (!execBtn && !skipBtn) return;
+
+    const id = (execBtn || skipBtn).getAttribute(execBtn ? "data-exec" : "data-skip");
+    if (!id) return;
+
+    if (skipBtn) {
+      skipBtn.disabled = true;
+      try {
+        addSkippedSignalId(id);
+        if (!String(id).startsWith("cand:")) {
+          await apiJson(`/api/recommendations/${encodeURIComponent(id)}/skip`, {
+            method: "POST",
+            body: "{}",
+          });
+        }
+        state.dashboardAt = 0;
+        await refreshVisible({ force: true });
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        skipBtn.disabled = false;
+      }
+      return;
+    }
+
+    const rec = state.signalsById.get(String(id));
+    if (!rec) return;
+    const card = document.querySelector(`[data-rec="${CSS.escape(id)}"]`);
+    const overBudget = rec.cash_valid === false || Number(rec.cash_after || 0) < 0;
+    const hint = overBudget
+      ? `<div class="pill bad" style="display:inline-block;margin-top:8px;">Over budget — reduce shares to fit cash.</div>`
+      : "";
+    const bodyHtml = `
+      <div class="subtle">Adjust entry and shares if needed, then confirm.</div>
+      ${hint}
+      <div style="height:10px"></div>
+      <label class="label">Entry price</label>
+      <input id="mEntry" class="input" type="number" step="0.01" inputmode="decimal" value="${rec.entry_price ?? ""}" />
+      <div style="height:10px"></div>
+      <label class="label">Shares</label>
+      <input id="mShares" class="input" type="number" step="1" inputmode="numeric" value="${rec.shares ?? ""}" />
+    `;
+    const res = await confirmDialog({ title: `Execute ${rec.ticker}`, bodyHtml, okText: "Execute" });
+    if (res !== "ok") return;
+    const entry = parseFloat(el("mEntry").value || "0");
+    const shares = parseFloat(el("mShares").value || "0");
+
+    execBtn.disabled = true;
+    if (card) card.style.opacity = "0.7";
+    try {
+      if (String(id).startsWith("cand:")) {
+        await apiJson("/api/trade/execute", {
+          method: "POST",
+          body: JSON.stringify({
+            ticker: rec.ticker,
+            entry_price: entry,
+            shares,
+            stop_loss: rec.stop_loss,
+            take_profit: rec.take_profit,
+            strategy: rec.strategy,
+            reason: (rec.reasons || []).join("; "),
+          }),
+        });
+      } else {
+        await apiJson(`/api/recommendations/${encodeURIComponent(id)}/execute`, {
+          method: "POST",
+          body: JSON.stringify({ entry_price: entry, shares }),
+        });
+      }
+      state.dashboardAt = 0;
+      await refreshVisible({ force: true });
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      execBtn.disabled = false;
+      if (card) card.style.opacity = "";
+    }
+  });
+
   el("runMarketScanBtn").addEventListener("click", () => runMarketScan().catch((e) => alert(e.message)));
   el("refreshSignalsBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
   el("refreshScansBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
@@ -737,6 +774,7 @@ async function main() {
   await refreshVisible({ force: true });
 
   setInterval(() => {
+    if ((localStorage.getItem("activeTab") || "signals") !== "signals") return;
     document.querySelectorAll("[data-exp]").forEach((span) => {
       const id = span.getAttribute("data-exp");
       const card = document.querySelector(`[data-rec="${CSS.escape(id)}"]`);
