@@ -297,3 +297,91 @@ async def execute_recommendation(rec_id: str, request: Request, body: dict[str, 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.get("/api/dashboard")
+async def api_dashboard(
+    request: Request,
+    rec_limit: int = 50,
+    scans_limit: int = 25,
+    trades_open_limit: int = 200,
+    trades_closed_limit: int = 200,
+) -> dict[str, Any]:
+    s = request.app.state.settings
+
+    async def portfolio():
+        p = await request.app.state.portfolio_service.get_portfolio()
+        return {"account_id": p.account_id, "cash_usd": p.cash_usd, "positions": p.positions}
+
+    async def journal_summary():
+        return await request.app.state.journal_service.summary()
+
+    async def recommendations():
+        return await request.app.state.recommendation_service.list(status="active", limit=rec_limit)
+
+    async def trades_open():
+        return await request.app.state.trade_service.list(status="open", limit=trades_open_limit)
+
+    async def trades_closed():
+        return await request.app.state.trade_service.list(status="closed", limit=trades_closed_limit)
+
+    async def scans():
+        rows = await db.list_scans_brief(s.db_path, limit=scans_limit)
+        models = [_row_to_scan_record(r) for r in rows]
+        return [m.model_dump(mode="json") for m in models]
+
+    async def marketscan_status_obj():
+        return {
+            "enabled": bool(s.marketscan_enabled),
+            "interval_seconds": s.marketscan_interval_seconds,
+            "only_market_hours": bool(s.marketscan_only_market_hours),
+            "top_n": s.marketscan_top_n,
+            "min_score": s.marketscan_min_score,
+            "universe_source": s.universe_source,
+            "universe_refresh_seconds": s.universe_refresh_seconds,
+        }
+
+    async def latest_marketscan():
+        row = await db.get_latest_market_scan(s.db_path)
+        if not row:
+            return None
+        result = json.loads(row["result_json"]) if row.get("result_json") else None
+        return {
+            "scan_id": row["scan_id"],
+            "created_at": row["created_at"],
+            "status": row["status"],
+            "result": result,
+            "error": row.get("error"),
+        }
+
+    (
+        p,
+        js,
+        recs,
+        to,
+        tc,
+        sc,
+        msst,
+        msl,
+    ) = await asyncio.gather(
+        portfolio(),
+        journal_summary(),
+        recommendations(),
+        trades_open(),
+        trades_closed(),
+        scans(),
+        marketscan_status_obj(),
+        latest_marketscan(),
+    )
+
+    return {
+        "portfolio": p,
+        "journal_summary": js,
+        "recommendations": recs,
+        "trades_open": to,
+        "trades_closed": tc,
+        "scans": sc,
+        "marketscan_status": msst,
+        "marketscan_latest": msl,
+        "server_time_utc": datetime.now(timezone.utc).isoformat(),
+    }
+

@@ -3,6 +3,8 @@ function el(id) {
 }
 
 const state = {
+  dashboard: null,
+  dashboardAt: 0,
   portfolio: null,
   portfolioAt: 0,
   signalsAt: 0,
@@ -73,6 +75,19 @@ async function getPortfolioCached({ force = false } = {}) {
   return p;
 }
 
+async function getDashboardCached({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && state.dashboard && now - state.dashboardAt < 15000) return state.dashboard;
+  const d = await apiJson("/api/dashboard");
+  state.dashboard = d;
+  state.dashboardAt = now;
+  if (d && d.portfolio) {
+    state.portfolio = d.portfolio;
+    state.portfolioAt = now;
+  }
+  return d;
+}
+
 async function loadMarketScanStatus() {
   try {
     const st = await apiJson("/marketscan/status");
@@ -83,6 +98,14 @@ async function loadMarketScanStatus() {
   } catch (e) {
     el("marketscanStatus").textContent = `Market scan: error (${e.message})`;
   }
+}
+
+function renderMarketScanStatus(st) {
+  if (!st) return;
+  const enabled = st.enabled ? "enabled" : "disabled";
+  const mh = st.only_market_hours ? "market-hours" : "24/7";
+  el("marketscanStatus").textContent =
+    `Market scan: ${enabled} | ${mh} | interval=${st.interval_seconds}s | top_n=${st.top_n} | min_score=${st.min_score}`;
 }
 
 function escapeHtml(s) {
@@ -180,8 +203,8 @@ function renderSignalCards(recs, { cashUsd = null } = {}) {
     .join("");
 }
 
-async function loadSummary() {
-  const s = await apiJson("/api/journal/summary");
+function renderSummary(s) {
+  if (!s) return;
   el("sumBudget").textContent = fmtMoney(s.initial_budget);
   el("sumCash").textContent = fmtMoney(s.current_cash);
   el("sumPositions").textContent = fmtMoney(s.open_positions_value);
@@ -204,6 +227,11 @@ async function loadSummary() {
   }
 }
 
+async function loadSummary() {
+  const s = await apiJson("/api/journal/summary");
+  renderSummary(s);
+}
+
 async function runMarketScan() {
   await apiJson("/marketscan/run", { method: "POST", body: "{}" });
   // poll briefly
@@ -216,7 +244,8 @@ async function runMarketScan() {
       // ignore
     }
   }
-  await loadSignals();
+  state.dashboardAt = 0;
+  await refreshVisible({ force: true });
 }
 
 function modal() {
@@ -239,24 +268,37 @@ async function confirmDialog({ title, bodyHtml, okText = "Confirm" }) {
   return res;
 }
 
-async function loadSignals() {
+async function loadSignals({ dashboard = null, force = false } = {}) {
   const out = el("signalCards");
   const empty = el("signalsEmpty");
   const now = Date.now();
-  if (now - state.signalsAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
+  if (!force && now - state.signalsAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
   out.innerHTML = "Loading…";
   empty.style.display = "none";
 
-  const [data, p] = await Promise.all([
-    apiJson("/api/recommendations?status=active&limit=50"),
-    getPortfolioCached(),
-  ]);
-  let recs = data.recommendations || [];
+  let recs = [];
+  let p = null;
+  let msl = null;
+  if (dashboard) {
+    recs = dashboard.recommendations || [];
+    p = dashboard.portfolio || null;
+    msl = dashboard.marketscan_latest || null;
+  } else {
+    const [data, port] = await Promise.all([
+      apiJson("/api/recommendations?status=active&limit=50"),
+      getPortfolioCached(),
+    ]);
+    recs = data.recommendations || [];
+    p = port;
+  }
+
   if (!recs.length) {
     // Fallback: show the latest market scan ranked list even if recommendations table is empty.
     try {
-      const latest = await apiJson("/marketscan/latest");
-      const ranked = (latest.result && (latest.result.candidates || latest.result.ranked)) ? (latest.result.candidates || latest.result.ranked) : [];
+      const latest = msl || (await apiJson("/marketscan/latest"));
+      const ranked = (latest.result && (latest.result.candidates || latest.result.ranked))
+        ? (latest.result.candidates || latest.result.ranked)
+        : [];
       if (ranked.length) {
         recs = ranked.map((c) => {
           const tp = c.trade_plan || {};
@@ -293,7 +335,7 @@ async function loadSignals() {
     }
     if (!recs.length) {
       out.innerHTML = "";
-      const cash = Number(p.cash_usd || 0);
+      const cash = Number((p && p.cash_usd) || 0);
       const reason =
         cash <= 0
           ? "Cash is $0. Set cash in the Sync tab, then tap Run scan."
@@ -304,7 +346,7 @@ async function loadSignals() {
     }
   }
 
-  out.innerHTML = renderSignalCards(recs, { cashUsd: Number(p.cash_usd || 0) });
+  out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0) });
   state.signalsAt = now;
 
   document.querySelectorAll("[data-skip]").forEach((b) => {
@@ -369,7 +411,8 @@ async function loadSignals() {
             body: JSON.stringify({ entry_price: entry, shares }),
           });
         }
-        await Promise.all([loadSummary(), loadSignals(), loadPositions(), loadPortfolio(), loadJournal()]);
+        state.dashboardAt = 0;
+        await refreshVisible({ force: true });
       } catch (e) {
         alert(e.message);
       } finally {
@@ -380,11 +423,12 @@ async function loadSignals() {
   });
 }
 
-async function loadScans() {
+async function loadScans({ dashboard = null, force = false } = {}) {
   const out = el("scansTable");
   out.innerHTML = "Loading…";
-  const data = await apiJson("/scans?limit=25");
-  const rows = data.scans || [];
+  const now = Date.now();
+  if (!force && now - state.scansAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
+  const rows = dashboard ? (dashboard.scans || []) : ((await apiJson("/scans?limit=25")).scans || []);
   const pillClass = (status) => {
     if (status === "completed") return "pill ok";
     if (status === "failed") return "pill bad";
@@ -418,6 +462,7 @@ async function loadScans() {
     </table>
   `;
   out.innerHTML = `<div class="table">${html}</div>`;
+  state.scansAt = now;
   document.querySelectorAll("[data-scan-view]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-scan-view");
@@ -468,11 +513,12 @@ async function runScan() {
   await loadScans();
 }
 
-async function loadPositions() {
+async function loadPositions({ dashboard = null, force = false } = {}) {
   const out = el("openPositions");
   out.innerHTML = "Loading…";
-  const data = await apiJson("/api/trades?status=open&limit=200");
-  const trades = data.trades || [];
+  const now = Date.now();
+  if (!force && now - state.positionsAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
+  const trades = dashboard ? (dashboard.trades_open || []) : ((await apiJson("/api/trades?status=open&limit=200")).trades || []);
   if (!trades.length) {
     out.innerHTML = `<div class="box">No open trades.</div>`;
     return;
@@ -480,8 +526,10 @@ async function loadPositions() {
 
   let priceByTicker = {};
   try {
-    const latest = await apiJson("/marketscan/latest");
-    const candidates = (latest.result && latest.result.candidates) ? latest.result.candidates : [];
+    const latest = dashboard ? (dashboard.marketscan_latest || null) : (await apiJson("/marketscan/latest"));
+    const candidates = (latest && latest.result && latest.result.ranked)
+      ? latest.result.ranked
+      : ((latest && latest.result && latest.result.candidates) ? latest.result.candidates : []);
     for (const c of candidates) {
       const t = c.ticker;
       const px = c.market && c.market.last_close;
@@ -524,6 +572,7 @@ async function loadPositions() {
       </table>
     </div>
   `;
+  state.positionsAt = now;
 
   document.querySelectorAll("[data-close]").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -558,11 +607,12 @@ async function loadPositions() {
   });
 }
 
-async function loadJournal() {
+async function loadJournal({ dashboard = null, force = false } = {}) {
   const out = el("closedTrades");
   out.innerHTML = "Loading…";
-  const data = await apiJson("/api/trades?status=closed&limit=200");
-  const trades = data.trades || [];
+  const now = Date.now();
+  if (!force && now - state.journalAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
+  const trades = dashboard ? (dashboard.trades_closed || []) : ((await apiJson("/api/trades?status=closed&limit=200")).trades || []);
   if (!trades.length) {
     out.innerHTML = `<div class="box">No closed trades yet.</div>`;
     return;
@@ -593,12 +643,17 @@ async function loadJournal() {
       </table>
     </div>
   `;
+  state.journalAt = now;
 }
 
-async function loadPortfolio() {
+async function loadPortfolio({ dashboard = null } = {}) {
   const box = el("portfolioBox");
   box.textContent = "Loading…";
-  const p = await getPortfolioCached({ force: true });
+  const p = dashboard ? dashboard.portfolio : await getPortfolioCached({ force: true });
+  if (p && p.positions) {
+    state.portfolio = p;
+    state.portfolioAt = Date.now();
+  }
   const positions = p.positions || [];
   const posRows = positions
     .map((x) => `<tr><td>${x.ticker}</td><td>${x.quantity}</td><td>${x.avg_price ?? ""}</td><td>${fmtTs(x.updated_at)}</td></tr>`)
@@ -619,7 +674,8 @@ async function setCash() {
   const v = parseFloat(el("cashInput").value || "0");
   await apiJson("/portfolio/cash", { method: "POST", body: JSON.stringify({ cash_usd: v }) });
   state.portfolioAt = 0;
-  await Promise.all([loadSummary(), loadPortfolio()]);
+  state.dashboardAt = 0;
+  await refreshVisible({ force: true });
 }
 
 async function uploadCsv() {
@@ -630,7 +686,8 @@ async function uploadCsv() {
   fd.append("file", fileInput.files[0]);
   await apiJson(`/portfolio/revolut/upload?mode=${encodeURIComponent(mode)}`, { method: "POST", body: fd });
   state.portfolioAt = 0;
-  await Promise.all([loadSummary(), loadPortfolio()]);
+  state.dashboardAt = 0;
+  await refreshVisible({ force: true });
 }
 
 function setTab(tab) {
@@ -645,15 +702,18 @@ function setTab(tab) {
   localStorage.setItem("activeTab", tab);
 }
 
-async function refreshVisible() {
-  await loadSummary();
+async function refreshVisible({ force = false } = {}) {
+  const dash = await getDashboardCached({ force });
+  renderSummary(dash.journal_summary);
+  renderMarketScanStatus(dash.marketscan_status);
   const tab = localStorage.getItem("activeTab") || "signals";
-  if (tab === "signals") await loadSignals();
-  if (tab === "scans") await loadScans();
-  if (tab === "positions") await loadPositions();
-  if (tab === "journal") await loadJournal();
-  if (tab === "sync") await loadPortfolio();
-  el("lastUpdated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  if (tab === "signals") await loadSignals({ dashboard: dash, force });
+  if (tab === "scans") await loadScans({ dashboard: dash, force });
+  if (tab === "positions") await loadPositions({ dashboard: dash, force });
+  if (tab === "journal") await loadJournal({ dashboard: dash, force });
+  if (tab === "sync") await loadPortfolio({ dashboard: dash });
+  const serverTs = dash && dash.server_time_utc ? new Date(dash.server_time_utc) : new Date();
+  el("lastUpdated").textContent = `Updated ${serverTs.toLocaleTimeString()}`;
 }
 
 async function main() {
@@ -673,9 +733,8 @@ async function main() {
   el("setCashBtn").addEventListener("click", () => setCash().catch((e) => alert(e.message)));
   el("uploadCsvBtn").addEventListener("click", () => uploadCsv().catch((e) => alert(e.message)));
 
-  await loadMarketScanStatus();
   setTab(localStorage.getItem("activeTab") || "signals");
-  await refreshVisible();
+  await refreshVisible({ force: true });
 
   setInterval(() => {
     document.querySelectorAll("[data-exp]").forEach((span) => {
