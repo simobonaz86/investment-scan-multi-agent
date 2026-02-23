@@ -37,7 +37,7 @@ def _rsi(values: list[float], period: int = 14) -> float | None:
 
 
 class SignalsAgent:
-    def analyze(self, closes: list[float]) -> dict[str, Any]:
+    def analyze(self, closes: list[float], *, market: dict[str, Any] | None = None) -> dict[str, Any]:
         last = closes[-1] if closes else None
         sma20 = _sma(closes, 20)
         sma50 = _sma(closes, 50)
@@ -52,11 +52,33 @@ class SignalsAgent:
             else:
                 trend = "mixed"
 
+        momentum_score: float | None = None
+        if market:
+            r1w = market.get("return_1w")
+            r1m = market.get("return_1m")
+            r3m = market.get("return_3m")
+            vals = [v for v in [r1w, r1m, r3m] if isinstance(v, (int, float))]
+            if vals:
+                # heuristic: favor shorter horizons slightly
+                momentum_score = 0.5 * float(r1w or 0.0) + 0.3 * float(r1m or 0.0) + 0.2 * float(r3m or 0.0)
+
+        mean_reversion: str | None = None
+        if rsi14 is not None and sma20 is not None and last is not None:
+            if rsi14 <= 30.0 and last < sma20 * 0.98:
+                mean_reversion = "oversold"
+            elif rsi14 >= 70.0 and last > sma20 * 1.02:
+                mean_reversion = "overbought"
+            else:
+                mean_reversion = "neutral"
+
         return {
             "last": last,
             "sma20": sma20,
             "sma50": sma50,
             "rsi14": rsi14,
             "trend": trend,
+            "momentum_score": momentum_score,
+            "mean_reversion": mean_reversion,
+            "volume_spike": (market or {}).get("volume_spike") if market else None,
         }
 

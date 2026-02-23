@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     market_open_hhmm: str = "09:30"
     market_close_hhmm: str = "16:00"
 
+    # Optional: S&P 500 weekly ranking (expensive; keep off by default)
+    sp500_weekly_ranking_enabled: bool = False
+    sp500_universe_path: str = "data/sp500_tickers.txt"
+    sp500_ranking_max_tickers: int = 200
+
 
 settings = Settings()
 

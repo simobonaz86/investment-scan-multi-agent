@@ -30,7 +30,7 @@ class ScanService:
         self._risk = RiskAgent()
         self._summary = SummaryAgent()
 
-        self._market_cache: TTLCache[str, tuple[dict[str, Any], list[float]]] = TTLCache(
+        self._market_cache: TTLCache[str, tuple[dict[str, Any], dict[str, list[float]]]] = TTLCache(
             ttl_seconds=settings.cache_ttl_seconds
         )
         self._news_cache: TTLCache[str, dict[str, Any]] = TTLCache(ttl_seconds=settings.cache_ttl_seconds)
@@ -39,13 +39,13 @@ class ScanService:
         async with self._sem:
             return await coro
 
-    async def _get_market(self, ticker: str) -> tuple[dict[str, Any], list[float]]:
+    async def _get_market(self, ticker: str) -> tuple[dict[str, Any], dict[str, list[float]]]:
         cached = self._market_cache.get(ticker)
         if cached is not None:
             return cached
-        market, closes = await self._limited(self._market.fetch_and_analyze(ticker))
-        self._market_cache.set(ticker, (market, closes))
-        return market, closes
+        market, series = await self._limited(self._market.fetch_and_analyze(ticker))
+        self._market_cache.set(ticker, (market, series))
+        return market, series
 
     async def _get_news(self, ticker: str) -> dict[str, Any]:
         key = f"{ticker}:stock"
@@ -66,8 +66,9 @@ class ScanService:
                 market_task = asyncio.create_task(self._get_market(ticker))
                 news_task = asyncio.create_task(self._get_news(ticker))
 
-                market, closes = await market_task
-                signals = self._signals.analyze(closes)
+                market, series = await market_task
+                closes = series.get("closes") or []
+                signals = self._signals.analyze(closes, market=market)
                 risk = self._risk.score(volatility_60d_ann=market.get("volatility_60d_ann"))
                 news = await news_task
                 report = {

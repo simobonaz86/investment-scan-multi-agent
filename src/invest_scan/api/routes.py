@@ -81,3 +81,15 @@ async def list_scans(request: Request, limit: int = 50) -> ScanListResponse:
     rows = await db.list_scans(db_path, limit=limit)
     return ScanListResponse(scans=[_row_to_scan_record(r) for r in rows])
 
+
+@router.get("/rankings/sp500/weekly")
+async def sp500_weekly_ranking(request: Request) -> dict[str, Any]:
+    settings = request.app.state.settings
+    if not settings.sp500_weekly_ranking_enabled:
+        raise HTTPException(status_code=403, detail="sp500_weekly_ranking_disabled")
+    svc = request.app.state.ranking_service
+    return await svc.sp500_weekly(
+        universe_path=settings.sp500_universe_path,
+        max_tickers=settings.sp500_ranking_max_tickers,
+    )
+
