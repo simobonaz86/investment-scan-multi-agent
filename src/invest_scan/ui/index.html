@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Investment Scan Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Investment Scan (MVP)</div>
+      <nav class="nav">
+        <a href="#scans">Scans</a>
+        <a href="#portfolio">Portfolio</a>
+        <a href="#rankings">Rankings</a>
+        <a href="/docs" target="_blank" rel="noreferrer">API</a>
+      </nav>
+    </header>
+
+    <main class="container">
+      <section class="card" id="scans">
+        <h2>Scans</h2>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Tickers (comma separated)</label>
+            <input id="tickersInput" class="input" value="AAPL,MSFT" />
+          </div>
+          <div>
+            <label class="label">&nbsp;</label>
+            <button id="runScanBtn" class="btn">Run scan</button>
+          </div>
+        </div>
+        <div class="row subtle">
+          <div id="autoscanStatus" class="pill">Loading autoscan status...</div>
+          <div class="spacer"></div>
+          <button id="refreshScansBtn" class="btn btn-secondary">Refresh</button>
+        </div>
+        <div id="scansTable" class="table"></div>
+      </section>
+
+      <section class="card" id="portfolio">
+        <h2>Portfolio</h2>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Cash (USD)</label>
+            <input id="cashInput" class="input" type="number" step="0.01" value="10000" />
+          </div>
+          <div>
+            <label class="label">&nbsp;</label>
+            <button id="setCashBtn" class="btn">Set cash</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Revolut CSV upload (holdings or trades)</label>
+            <input id="csvFile" class="input" type="file" accept=".csv,text/csv" />
+            <div class="help">MVP supports common columns like: Date, Instrument, Type, Quantity, Price, Total.</div>
+          </div>
+          <div>
+            <label class="label">Mode</label>
+            <select id="csvMode" class="input">
+              <option value="auto" selected>auto</option>
+              <option value="positions">positions</option>
+              <option value="trades">trades</option>
+            </select>
+            <div style="height: 8px"></div>
+            <button id="uploadCsvBtn" class="btn btn-secondary">Upload</button>
+          </div>
+        </div>
+        <div id="portfolioBox" class="box">Loading portfolio...</div>
+      </section>
+
+      <section class="card" id="rankings">
+        <h2>Rankings</h2>
+        <div class="row">
+          <div class="grow subtle">
+            S&amp;P 500 weekly ranking is disabled by default (enable via env).
+          </div>
+          <button id="loadRankingBtn" class="btn btn-secondary">Load ranking</button>
+        </div>
+        <div id="rankingBox" class="box">No ranking loaded.</div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Tip: configure autoscan + risk sizing via <code>.env</code>.</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

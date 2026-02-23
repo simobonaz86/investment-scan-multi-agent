@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from invest_scan import db
@@ -60,6 +62,8 @@ def create_app(
     app = FastAPI(title="Investment Scan MVP", version="0.1.0", lifespan=lifespan)
     app.add_middleware(GZipMiddleware, minimum_size=1500)
     app.include_router(router)
+    ui_dir = Path(__file__).resolve().parent / "ui"
+    app.mount("/static", StaticFiles(directory=str(ui_dir)), name="static")
     return app
 
 

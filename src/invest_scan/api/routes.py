@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from invest_scan import db
 from invest_scan.models import ScanCreateResponse, ScanListResponse, ScanRecord, ScanRequest, ScanStatusResponse
@@ -15,6 +16,7 @@ from invest_scan.services.scan_service import scan_record_from_row
 
 
 router = APIRouter()
+_UI_DIR = Path(__file__).resolve().parents[1] / "ui"
 
 
 def _parse_dt(x: str | None) -> datetime | None:
@@ -39,7 +41,7 @@ async def index() -> str:
       <head><title>Investment Scan MVP</title></head>
       <body>
         <h2>Investment Scan Multi-Agent (MVP)</h2>
-        <p>Use the API docs at <a href="/docs">/docs</a>.</p>
+        <p>Open the <a href="/app">Dashboard</a> or use the API docs at <a href="/docs">/docs</a>.</p>
         <pre>
 POST /scan {"tickers":["AAPL","MSFT"],"as_of":"auto"}
 GET  /scan/{scan_id}
@@ -48,6 +50,11 @@ GET  /scans
       </body>
     </html>
     """
+
+
+@router.get("/app", response_class=FileResponse)
+async def dashboard() -> FileResponse:
+    return FileResponse(_UI_DIR / "index.html")
 
 
 @router.get("/health")
@@ -92,6 +99,20 @@ async def sp500_weekly_ranking(request: Request) -> dict[str, Any]:
         universe_path=settings.sp500_universe_path,
         max_tickers=settings.sp500_ranking_max_tickers,
     )
+
+
+@router.get("/autoscan/status")
+async def autoscan_status(request: Request) -> dict[str, Any]:
+    s = request.app.state.settings
+    return {
+        "enabled": bool(s.autoscan_enabled),
+        "interval_seconds": s.autoscan_interval_seconds,
+        "tickers_csv": s.autoscan_tickers_csv,
+        "only_market_hours": bool(s.autoscan_only_market_hours),
+        "market_timezone": s.market_timezone,
+        "market_open_hhmm": s.market_open_hhmm,
+        "market_close_hhmm": s.market_close_hhmm,
+    }
 
 
 @router.get("/portfolio")
