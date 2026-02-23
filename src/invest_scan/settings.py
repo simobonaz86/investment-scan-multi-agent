@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 300
     max_news_items: int = 8
 
+    # Automated scanning (MVP scheduler)
+    autoscan_enabled: bool = False
+    autoscan_interval_seconds: int = 300
+    autoscan_tickers_csv: str = "AAPL,MSFT"
+    autoscan_only_market_hours: bool = True
+    market_timezone: str = "America/New_York"
+    market_open_hhmm: str = "09:30"
+    market_close_hhmm: str = "16:00"
+
 
 settings = Settings()
 

@@ -109,3 +109,13 @@ async def list_scans(db_path: str, limit: int = 50) -> list[dict[str, Any]]:
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+
+async def get_latest_scan(db_path: str) -> dict[str, Any] | None:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM scans ORDER BY created_at DESC LIMIT 1")
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return dict(row)
+

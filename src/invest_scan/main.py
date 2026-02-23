@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
@@ -7,6 +8,7 @@ from fastapi import FastAPI
 from starlette.middleware.gzip import GZipMiddleware
 
 from invest_scan import db
+from invest_scan.autoscan import autoscan_loop
 from invest_scan.api import router
 from invest_scan.settings import Settings, settings
 from invest_scan.services.scan_service import ScanService
@@ -34,9 +36,19 @@ def create_app(
         app.state.settings = settings_obj
         app.state.http = http
         app.state.scan_service = ScanService(settings=settings_obj, http=http)
+        autoscan_task: asyncio.Task | None = None
+        if settings_obj.autoscan_enabled:
+            autoscan_task = asyncio.create_task(autoscan_loop(app))
+            app.state.autoscan_task = autoscan_task
         try:
             yield
         finally:
+            if autoscan_task is not None:
+                autoscan_task.cancel()
+                try:
+                    await autoscan_task
+                except asyncio.CancelledError:
+                    pass
             await http.aclose()
 
     app = FastAPI(title="Investment Scan MVP", version="0.1.0", lifespan=lifespan)
