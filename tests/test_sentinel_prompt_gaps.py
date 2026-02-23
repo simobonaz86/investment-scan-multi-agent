@@ -118,3 +118,24 @@ async def test_recommendation_expiry_logic(app, client):
     ]
     assert rid in {x["rec_id"] for x in exp_list}
 
+
+async def test_recommendations_visible_even_if_over_budget(client):
+    # Small cash, still expect recommendations (marked as over budget).
+    r_cash = await client.post("/portfolio/cash", json={"cash_usd": 50.0})
+    assert r_cash.status_code == 200
+
+    r = await client.post("/marketscan/run")
+    assert r.status_code == 200
+
+    for _ in range(80):
+        latest = await client.get("/marketscan/latest")
+        if latest.status_code == 200 and latest.json()["status"] in ("completed", "failed"):
+            break
+        await asyncio.sleep(0.02)
+
+    recs = (await client.get("/api/recommendations?status=active&limit=10")).json()[
+        "recommendations"
+    ]
+    assert recs, "expected at least one recommendation even with low cash"
+    assert any((r.get("cash_valid") is False) or float(r.get("cash_after") or 0) < 0 for r in recs)
+

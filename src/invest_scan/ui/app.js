@@ -158,12 +158,17 @@ async function loadSignals() {
       const tag = (r.strategy || "manual").toLowerCase();
       const expiresIn = fmtCountdown(msUntil(r.expires_at));
       const reasons = (r.reasons || []).slice(0, 4);
+      const overBudget = r.cash_valid === false || Number(r.cash_after || 0) < 0;
+      const budgetPill = overBudget ? `<span class="pill bad">Over budget</span>` : `<span class="pill ok">Cash OK</span>`;
       return `
         <div class="action-card" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
           <div class="action-top">
             <div>
               <div class="ticker">${r.ticker}</div>
-              <div class="subtle">Expires in <span data-exp="${r.rec_id}">${expiresIn}</span></div>
+              <div class="subtle">
+                Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>
+                &nbsp;·&nbsp; ${budgetPill}
+              </div>
             </div>
             <div class="tag ${tag}">${tag}</div>
           </div>
@@ -213,8 +218,13 @@ async function loadSignals() {
       const card = document.querySelector(`[data-rec="${CSS.escape(id)}"]`);
       const rec = recs.find((x) => x.rec_id === id);
       if (!rec) return;
+      const overBudget = rec.cash_valid === false || Number(rec.cash_after || 0) < 0;
+      const hint = overBudget
+        ? `<div class="pill bad" style="display:inline-block;margin-top:8px;">Over budget — reduce shares to fit cash.</div>`
+        : "";
       const bodyHtml = `
         <div class="subtle">Adjust entry and shares if needed, then confirm.</div>
+        ${hint}
         <div style="height:10px"></div>
         <label class="label">Entry price</label>
         <input id="mEntry" class="input" type="number" step="0.01" inputmode="decimal" value="${rec.entry_price ?? ""}" />

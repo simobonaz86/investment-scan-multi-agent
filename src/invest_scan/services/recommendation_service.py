@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
@@ -26,6 +27,7 @@ def _parse_dt(s: str | None) -> datetime | None:
 
 
 def _row_to_rec(row: dict[str, Any]) -> dict[str, Any]:
+    cash_after = float(row["cash_after"]) if row.get("cash_after") is not None else None
     return {
         "rec_id": row["rec_id"],
         "ticker": row["ticker"],
@@ -39,7 +41,8 @@ def _row_to_rec(row: dict[str, Any]) -> dict[str, Any]:
         "notional_usd": float(row["notional_usd"]) if row.get("notional_usd") is not None else None,
         "max_loss_usd": float(row["max_loss_usd"]) if row.get("max_loss_usd") is not None else None,
         "risk_reward_ratio": float(row["risk_reward_ratio"]) if row.get("risk_reward_ratio") is not None else None,
-        "cash_after": float(row["cash_after"]) if row.get("cash_after") is not None else None,
+        "cash_after": cash_after,
+        "cash_valid": (cash_after is not None and cash_after >= 0.0),
         "status": row["status"],
         "source_scan_id": row.get("source_scan_id"),
         "created_at": row["created_at"],
@@ -61,17 +64,22 @@ class RecommendationService:
         cash_usd: float,
     ) -> dict[str, Any] | None:
         tp = candidate.get("trade_plan") or {}
-        if not tp or not tp.get("enabled") or (tp.get("cash_valid") is False):
-            return None
+        market = candidate.get("market") or {}
 
         ticker = str(candidate.get("ticker") or "").strip().upper()
         if not ticker:
             return None
 
-        entry = float(tp.get("entry_price") or 0.0)
+        entry = float(tp.get("entry_price") or market.get("last_close") or 0.0)
+        atr14 = market.get("atr14")
+        atr = float(atr14) if isinstance(atr14, (int, float)) else None
         stop = float(tp.get("stop_loss") or 0.0) if tp.get("stop_loss") is not None else None
-        shares = int(tp.get("shares") or 0)
-        if entry <= 0 or not stop or stop <= 0 or shares <= 0:
+        if stop is None:
+            if atr is None or atr <= 0:
+                return None
+            stop = entry - (atr * float(self._settings.stop_atr_multiple))
+
+        if entry <= 0 or stop <= 0:
             return None
 
         stop_dist = entry - stop
@@ -90,8 +98,20 @@ class RecommendationService:
             strategy = "manual"
 
         take_profit = entry + (2.0 * stop_dist)
-        notional = entry * shares
-        max_loss = shares * stop_dist
+
+        planning_cash = float(max(0.0, cash_usd))
+        if planning_cash <= 0:
+            planning_cash = float(max(0.0, self._settings.initial_budget))
+
+        risk_pct = float(max(0.0, min(0.05, self._settings.risk_per_trade_pct)))
+        risk_budget = planning_cash * risk_pct
+        risk_per_share = stop_dist
+        shares_by_risk = int(risk_budget // risk_per_share) if risk_per_share > 0 else 0
+        shares_by_min_pos = int(math.ceil(float(self._settings.min_position_usd) / entry))
+        shares_suggested = int(max(1, shares_by_risk, shares_by_min_pos, int(tp.get("shares") or 0)))
+
+        notional = entry * shares_suggested
+        max_loss = shares_suggested * stop_dist
         rr = (take_profit - entry) / stop_dist if stop_dist > 0 else None
         cash_after = float(cash_usd) - notional
 
@@ -123,7 +143,7 @@ class RecommendationService:
                     entry,
                     stop,
                     take_profit,
-                    shares,
+                    shares_suggested,
                     notional,
                     max_loss,
                     rr,
