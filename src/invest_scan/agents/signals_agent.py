@@ -41,7 +41,8 @@ def _stdev(values: list[float], window: int) -> float | None:
         return None
     xs = values[-window:]
     mean = sum(xs) / len(xs)
-    var = sum((x - mean) ** 2 for x in xs) / (len(xs) - 1)
+    # Bollinger Bands conventionally use population standard deviation over the window.
+    var = sum((x - mean) ** 2 for x in xs) / len(xs)
     sd = math.sqrt(var)
     if math.isnan(sd) or math.isinf(sd):
         return None
@@ -49,7 +50,9 @@ def _stdev(values: list[float], window: int) -> float | None:
 
 
 class SignalsAgent:
-    def analyze(self, closes: list[float], *, market: dict[str, Any] | None = None) -> dict[str, Any]:
+    def analyze(
+        self, closes: list[float], *, market: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         last = closes[-1] if closes else None
         sma20 = _sma(closes, 20)
         sma50 = _sma(closes, 50)
@@ -86,16 +89,26 @@ class SignalsAgent:
             vals = [v for v in [r1w, r1m, r3m] if isinstance(v, (int, float))]
             if vals:
                 # heuristic: favor shorter horizons slightly
-                momentum_score = 0.5 * float(r1w or 0.0) + 0.3 * float(r1m or 0.0) + 0.2 * float(r3m or 0.0)
+                momentum_score = (
+                    0.5 * float(r1w or 0.0)
+                    + 0.3 * float(r1m or 0.0)
+                    + 0.2 * float(r3m or 0.0)
+                )
 
         mean_reversion: str | None = None
         if sma20 is not None and last is not None:
             oversold = (
-                ((rsi14 is not None and rsi14 <= 30.0) or (bollinger_position is not None and bollinger_position < 0.05))
+                (
+                    (rsi14 is not None and rsi14 <= 30.0)
+                    or (bollinger_position is not None and bollinger_position < 0.05)
+                )
                 and last < sma20 * 0.98
             )
             overbought = (
-                ((rsi14 is not None and rsi14 >= 70.0) or (bollinger_position is not None and bollinger_position > 0.95))
+                (
+                    (rsi14 is not None and rsi14 >= 70.0)
+                    or (bollinger_position is not None and bollinger_position > 0.95)
+                )
                 and last > sma20 * 1.02
             )
             if oversold:

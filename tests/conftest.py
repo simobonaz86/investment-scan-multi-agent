@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
-from typing import Callable
 
 import httpx
 import pytest
@@ -59,7 +58,11 @@ def app(tmp_path: Path):
         return httpx.Response(404, text="not found")
 
     transport = httpx.MockTransport(handler)
-    settings = Settings(db_path=str(tmp_path / "test.db"), cache_ttl_seconds=1, marketscan_interval_seconds=999999)
+    settings = Settings(
+        db_path=str(tmp_path / "test.db"),
+        cache_ttl_seconds=1,
+        marketscan_interval_seconds=999999,
+    )
     return create_app(settings_obj=settings, transport=transport)
 
 
