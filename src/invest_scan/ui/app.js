@@ -39,6 +39,146 @@ async function loadAutoscan() {
   }
 }
 
+async function loadMarketScanStatus() {
+  try {
+    const st = await api("/marketscan/status");
+    const enabled = st.enabled ? "enabled" : "disabled";
+    el("marketscanStatus").textContent = `Market scan: ${enabled} | interval=${st.interval_seconds}s | top_n=${st.top_n} | universe=${st.universe_source}`;
+  } catch (e) {
+    el("marketscanStatus").textContent = `Market scan: error (${e.message})`;
+  }
+}
+
+function scorePill(score) {
+  const s = Number(score || 0);
+  if (s >= 20) return `<span class="pill ok">${s.toFixed(1)}</span>`;
+  if (s >= 5) return `<span class="pill warn">${s.toFixed(1)}</span>`;
+  return `<span class="pill bad">${s.toFixed(1)}</span>`;
+}
+
+async function loadMarketCandidates() {
+  const out = el("marketCandidatesTable");
+  out.innerHTML = "Loading latest market scan...";
+  let latest;
+  try {
+    latest = await api("/marketscan/latest", { method: "GET" });
+  } catch (e) {
+    out.innerHTML = `<div class="box"><pre>No market scan yet.\n\nClick “Run market scan”.\n\n${e.message}</pre></div>`;
+    return;
+  }
+  const result = latest.result;
+  if (!result || !result.candidates) {
+    out.innerHTML = `<div class="box"><pre>Status: ${latest.status}\nNo results yet.</pre></div>`;
+    return;
+  }
+
+  const rows = result.candidates || [];
+  const html = `
+    <table>
+      <thead>
+        <tr>
+          <th>Score</th>
+          <th>Ticker</th>
+          <th>Why</th>
+          <th>Entry</th>
+          <th>Stop</th>
+          <th>Shares</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map((c) => {
+            const tp = c.trade_plan || {};
+            const m = c.market || {};
+            const reasons = (c.reasons || []).slice(0, 3).join("; ");
+            return `
+              <tr>
+                <td>${scorePill(c.score)}</td>
+                <td><b>${c.ticker}</b></td>
+                <td class="subtle">${reasons}</td>
+                <td>${m.last_close ?? ""}</td>
+                <td>${tp.stop_loss ? Number(tp.stop_loss).toFixed(2) : ""}</td>
+                <td>${tp.shares ?? ""}</td>
+                <td><button class="btn btn-secondary" data-cand="${c.ticker}">Details</button></td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+  out.innerHTML = `<div class="table">${html}</div>`;
+
+  document.querySelectorAll("[data-cand]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const t = btn.getAttribute("data-cand");
+      const cand = rows.find((x) => x.ticker === t);
+      showCandidateDetail(cand, result);
+    });
+  });
+
+  if (rows[0]) showCandidateDetail(rows[0], result);
+}
+
+function showCandidateDetail(c, result) {
+  const box = el("marketCandidateDetail");
+  if (!c) {
+    box.innerHTML = "<pre>No candidate selected.</pre>";
+    return;
+  }
+  const m = c.market || {};
+  const s = c.signals || {};
+  const tp = c.trade_plan || {};
+  const lines = [];
+  lines.push(`${c.ticker} — score ${Number(c.score || 0).toFixed(1)}`);
+  lines.push("");
+  lines.push("WHY:");
+  for (const r of (c.reasons || [])) lines.push(`- ${r}`);
+  lines.push("");
+  lines.push("SIGNALS:");
+  lines.push(`- trend: ${s.trend}`);
+  lines.push(`- momentum_score: ${s.momentum_score}`);
+  lines.push(`- mean_reversion: ${s.mean_reversion}`);
+  lines.push(`- volume_spike: ${s.volume_spike}`);
+  lines.push("");
+  lines.push("MARKET:");
+  lines.push(`- last_close: ${m.last_close}`);
+  lines.push(`- return_1w: ${m.return_1w}`);
+  lines.push(`- return_1m: ${m.return_1m}`);
+  lines.push(`- volatility_60d_ann: ${m.volatility_60d_ann}`);
+  lines.push(`- atr14: ${m.atr14}`);
+  lines.push("");
+  lines.push("TRADE PLAN (MVP):");
+  if (tp.enabled) {
+    lines.push(`- shares: ${tp.shares}`);
+    lines.push(`- entry: ${tp.entry_price}`);
+    lines.push(`- stop_loss: ${tp.stop_loss}`);
+    lines.push(`- notional_usd: ${tp.notional_usd}`);
+    lines.push(`- cash_valid: ${tp.cash_valid}`);
+  } else {
+    lines.push(`- disabled: ${tp.reason || "n/a"}`);
+  }
+  lines.push("");
+  lines.push(`Scan generated: ${result.generated_at}`);
+  box.innerHTML = `<pre>${lines.join("\n")}</pre>`;
+}
+
+async function runMarketScan() {
+  await api("/marketscan/run", { method: "POST", body: "{}" });
+  // poll briefly
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const latest = await api("/marketscan/latest", { method: "GET" });
+      if (latest.status === "completed") break;
+    } catch {
+      // ignore
+    }
+  }
+  await loadMarketCandidates();
+}
+
 async function loadScans() {
   const out = el("scansTable");
   out.innerHTML = "Loading scans...";
@@ -191,9 +331,13 @@ async function main() {
   el("setCashBtn").addEventListener("click", () => setCash().catch(alert));
   el("uploadCsvBtn").addEventListener("click", () => uploadCsv().catch(alert));
   el("loadRankingBtn").addEventListener("click", () => loadRanking().catch(alert));
+  el("refreshMarketScanBtn").addEventListener("click", () => loadMarketCandidates().catch(alert));
+  el("runMarketScanBtn").addEventListener("click", () => runMarketScan().catch(alert));
 
   await loadAutoscan();
+  await loadMarketScanStatus();
   await loadPortfolio();
+  await loadMarketCandidates();
   await loadScans();
   // Preload detail for most recent scan (if any)
   try {

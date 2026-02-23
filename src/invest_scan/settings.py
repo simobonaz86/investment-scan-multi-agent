@@ -19,10 +19,22 @@ class Settings(BaseSettings):
     market_open_hhmm: str = "09:30"
     market_close_hhmm: str = "16:00"
 
-    # Optional: S&P 500 weekly ranking (expensive; keep off by default)
-    sp500_weekly_ranking_enabled: bool = False
-    sp500_universe_path: str = "data/sp500_tickers.txt"
+    # Universe + rankings
+    universe_source: str = "sp500_datahub_csv"
+    universe_datahub_csv_url: str = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
+    universe_refresh_seconds: int = 86400
+    universe_max_tickers: int = 500
+
+    # Ranking: rolling 1-week return (5 trading days), can run any day.
+    sp500_weekly_ranking_enabled: bool = True
     sp500_ranking_max_tickers: int = 200
+
+    # Market-wide scan (find candidates automatically)
+    marketscan_enabled: bool = True
+    marketscan_interval_seconds: int = 1800
+    marketscan_only_market_hours: bool = True
+    marketscan_top_n: int = 25
+    marketscan_min_score: float = 5.0
 
     # Position sizing (MVP)
     risk_per_trade_pct: float = 0.01

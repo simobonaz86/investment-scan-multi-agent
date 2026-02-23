@@ -99,7 +99,6 @@ async def sp500_weekly_ranking(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="sp500_weekly_ranking_disabled")
     svc = request.app.state.ranking_service
     return await svc.sp500_weekly(
-        universe_path=settings.sp500_universe_path,
         max_tickers=settings.sp500_ranking_max_tickers,
     )
 
@@ -116,6 +115,48 @@ async def autoscan_status(request: Request) -> dict[str, Any]:
         "market_open_hhmm": s.market_open_hhmm,
         "market_close_hhmm": s.market_close_hhmm,
     }
+
+
+@router.get("/marketscan/status")
+async def marketscan_status(request: Request) -> dict[str, Any]:
+    s = request.app.state.settings
+    return {
+        "enabled": bool(s.marketscan_enabled),
+        "interval_seconds": s.marketscan_interval_seconds,
+        "only_market_hours": bool(s.marketscan_only_market_hours),
+        "top_n": s.marketscan_top_n,
+        "min_score": s.marketscan_min_score,
+        "universe_source": s.universe_source,
+        "universe_refresh_seconds": s.universe_refresh_seconds,
+    }
+
+
+@router.post("/marketscan/run")
+async def marketscan_run(request: Request) -> dict[str, Any]:
+    scan_id = await db.create_market_scan(request.app.state.settings.db_path)
+    asyncio.create_task(request.app.state.market_scan_service.run_and_persist(scan_id=scan_id))
+    return {"scan_id": scan_id, "status": "queued"}
+
+
+@router.get("/marketscan/latest")
+async def marketscan_latest(request: Request) -> dict[str, Any]:
+    row = await db.get_latest_market_scan(request.app.state.settings.db_path)
+    if not row:
+        raise HTTPException(status_code=404, detail="no_market_scan_found")
+    result = json.loads(row["result_json"]) if row.get("result_json") else None
+    return {
+        "scan_id": row["scan_id"],
+        "created_at": row["created_at"],
+        "status": row["status"],
+        "result": result,
+        "error": row.get("error"),
+    }
+
+
+@router.get("/universe")
+async def universe(request: Request) -> dict[str, Any]:
+    return await request.app.state.universe_service.get_universe()
+
 
 
 @router.get("/portfolio")

@@ -45,3 +45,25 @@ async def test_scans_list_is_brief_by_default(client):
     if scans:
         assert scans[0]["result"] is None
 
+
+async def test_marketscan_run_and_latest(client):
+    r = await client.post("/portfolio/cash", json={"cash_usd": 10000})
+    assert r.status_code == 200
+
+    r = await client.post("/marketscan/run")
+    assert r.status_code == 200
+
+    # poll latest
+    for _ in range(50):
+        latest = await client.get("/marketscan/latest")
+        if latest.status_code == 200 and latest.json()["status"] in ("completed", "failed"):
+            break
+        await asyncio.sleep(0.02)
+
+    latest = await client.get("/marketscan/latest")
+    assert latest.status_code == 200
+    body = latest.json()
+    assert body["status"] == "completed"
+    assert body["result"]["universe_size"] >= 1
+    assert len(body["result"]["candidates"]) >= 1
+

@@ -78,6 +78,21 @@ async def init_db(db_path: str) -> None:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_portfolio_trade_account_date ON portfolio_trade(account_id, trade_date)"
         )
+
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_scans (
+              scan_id TEXT PRIMARY KEY,
+              created_at TEXT NOT NULL,
+              status TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT,
+              result_json TEXT,
+              error TEXT
+            )
+            """
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_market_scans_created_at ON market_scans(created_at)")
         await db.commit()
 
 
@@ -191,4 +206,89 @@ async def get_latest_scan(db_path: str) -> dict[str, Any] | None:
         if not row:
             return None
         return dict(row)
+
+
+async def create_market_scan(db_path: str) -> UUID:
+    scan_id = uuid4()
+    created_at = _utcnow().isoformat()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            INSERT INTO market_scans(scan_id, created_at, status)
+            VALUES (?, ?, ?)
+            """,
+            (str(scan_id), created_at, "queued"),
+        )
+        await db.commit()
+    return scan_id
+
+
+async def mark_market_running(db_path: str, scan_id: UUID) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            UPDATE market_scans
+            SET status = ?, started_at = ?
+            WHERE scan_id = ?
+            """,
+            ("running", _utcnow().isoformat(), str(scan_id)),
+        )
+        await db.commit()
+
+
+async def set_market_result(db_path: str, scan_id: UUID, result: dict[str, Any]) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            UPDATE market_scans
+            SET status = ?, finished_at = ?, result_json = ?, error = NULL
+            WHERE scan_id = ?
+            """,
+            ("completed", _utcnow().isoformat(), json.dumps(result), str(scan_id)),
+        )
+        await db.commit()
+
+
+async def set_market_failed(db_path: str, scan_id: UUID, error: str) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            UPDATE market_scans
+            SET status = ?, finished_at = ?, error = ?
+            WHERE scan_id = ?
+            """,
+            ("failed", _utcnow().isoformat(), error, str(scan_id)),
+        )
+        await db.commit()
+
+
+async def get_market_scan(db_path: str, scan_id: UUID) -> dict[str, Any] | None:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM market_scans WHERE scan_id = ?", (str(scan_id),))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+
+async def get_latest_market_scan(db_path: str) -> dict[str, Any] | None:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM market_scans ORDER BY created_at DESC LIMIT 1")
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+
+async def list_market_scans(db_path: str, limit: int = 20) -> list[dict[str, Any]]:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM market_scans ORDER BY created_at DESC LIMIT ?",
+            (int(limit),),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
