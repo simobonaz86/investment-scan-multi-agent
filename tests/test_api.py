@@ -37,3 +37,11 @@ async def test_scan_flow(client):
     assert scan["result"]["reports"][0]["ticker"] == "AAPL"
     assert scan["result"]["reports"][0]["trade_plan"]["enabled"] is True
 
+
+async def test_scans_list_is_brief_by_default(client):
+    r = await client.get("/scans?limit=5")
+    assert r.status_code == 200
+    scans = r.json()["scans"]
+    if scans:
+        assert scans[0]["result"] is None
+

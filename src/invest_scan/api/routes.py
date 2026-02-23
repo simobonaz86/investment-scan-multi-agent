@@ -83,9 +83,12 @@ async def get_scan(scan_id: UUID, request: Request) -> ScanStatusResponse:
 
 
 @router.get("/scans", response_model=ScanListResponse)
-async def list_scans(request: Request, limit: int = 50) -> ScanListResponse:
+async def list_scans(request: Request, limit: int = 50, include_result: bool = False) -> ScanListResponse:
     db_path = request.app.state.settings.db_path
-    rows = await db.list_scans(db_path, limit=limit)
+    if include_result:
+        rows = await db.list_scans(db_path, limit=limit)
+    else:
+        rows = await db.list_scans_brief(db_path, limit=limit)
     return ScanListResponse(scans=[_row_to_scan_record(r) for r in rows])
 
 

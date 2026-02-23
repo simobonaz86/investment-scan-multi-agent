@@ -17,6 +17,13 @@ async def init_db(db_path: str) -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
+        # Performance + concurrency friendly defaults for a single-node SQLite app.
+        # If WAL is unsupported by the filesystem, SQLite will ignore/fallback safely.
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA temp_store=MEMORY")
+        await db.execute("PRAGMA foreign_keys=ON")
+
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS scans (
@@ -143,6 +150,33 @@ async def list_scans(db_path: str, limit: int = 50) -> list[dict[str, Any]]:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT * FROM scans ORDER BY created_at DESC LIMIT ?",
+            (int(limit),),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def list_scans_brief(db_path: str, limit: int = 50) -> list[dict[str, Any]]:
+    """
+    List scans without returning/parsing potentially large result_json.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """
+            SELECT
+              scan_id,
+              created_at,
+              status,
+              started_at,
+              finished_at,
+              request_json,
+              NULL AS result_json,
+              error
+            FROM scans
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
             (int(limit),),
         )
         rows = await cur.fetchall()
