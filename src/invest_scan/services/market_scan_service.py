@@ -46,6 +46,15 @@ def _score_and_reasons(*, market: dict[str, Any], signals: dict[str, Any]) -> tu
         score -= 6
         reasons.append("mean reversion: overbought")
 
+    bp = signals.get("bollinger_position")
+    if isinstance(bp, (int, float)):
+        if float(bp) < 0.05:
+            score += 3
+            reasons.append("price below lower Bollinger Band")
+        elif float(bp) > 0.95:
+            score -= 3
+            reasons.append("price above upper Bollinger Band")
+
     if market.get("volume_spike") is True:
         score += 4
         r = market.get("volume_spike_ratio")
