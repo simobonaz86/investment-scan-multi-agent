@@ -18,6 +18,7 @@ from invest_scan.services.journal_service import JournalService
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
+from invest_scan.services.recommendation_service import RecommendationService
 from invest_scan.services.trade_service import TradeService
 from invest_scan.services.universe_service import UniverseService
 
@@ -45,6 +46,9 @@ def create_app(
         app.state.http = http
         app.state.portfolio_service = PortfolioService(settings=settings_obj)
         app.state.trade_service = TradeService(settings=settings_obj)
+        app.state.recommendation_service = RecommendationService(
+            settings=settings_obj, trade_service=app.state.trade_service
+        )
         app.state.universe_service = UniverseService(settings=settings_obj, http=http)
         app.state.ranking_service = RankingService(
             settings=settings_obj, http=http, universe=app.state.universe_service
@@ -57,6 +61,7 @@ def create_app(
             http=http,
             universe=app.state.universe_service,
             portfolio=app.state.portfolio_service,
+            recommendations=app.state.recommendation_service,
         )
         app.state.journal_service = JournalService(
             settings=settings_obj, http=http, portfolio=app.state.portfolio_service

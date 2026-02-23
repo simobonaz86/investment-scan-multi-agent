@@ -53,6 +53,11 @@ async def autoscan_loop(app: FastAPI) -> None:
 
     while True:
         try:
+            try:
+                if hasattr(app.state, "recommendation_service"):
+                    await app.state.recommendation_service.expire_due()
+            except Exception:
+                pass
             if (not settings.autoscan_only_market_hours) or mh.is_open_now():
                 latest = await db.get_latest_scan(settings.db_path)
                 if latest and latest.get("status") in {"queued", "running"}:
@@ -85,6 +90,11 @@ async def market_scan_loop(app: FastAPI) -> None:
 
     while True:
         try:
+            try:
+                if hasattr(app.state, "recommendation_service"):
+                    await app.state.recommendation_service.expire_due()
+            except Exception:
+                pass
             if (not settings.marketscan_only_market_hours) or mh.is_open_now():
                 latest = await db.get_latest_market_scan(settings.db_path)
                 if latest and latest.get("status") in {"queued", "running"}:

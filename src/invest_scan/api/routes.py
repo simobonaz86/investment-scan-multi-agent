@@ -260,3 +260,40 @@ async def journal_export(request: Request) -> Response:
 async def journal_daily(request: Request) -> dict[str, Any]:
     return await request.app.state.journal_service.daily()
 
+
+@router.get("/api/recommendations")
+async def list_recommendations(request: Request, status: str = "active", limit: int = 50) -> dict[str, Any]:
+    svc = request.app.state.recommendation_service
+    st = str(status or "active").lower()
+    if st not in {"active", "executed", "skipped", "expired", "all"}:
+        raise HTTPException(status_code=400, detail="invalid_status")
+    recs = await svc.list(status=st, limit=limit)
+    return {"recommendations": recs}
+
+
+@router.post("/api/recommendations/{rec_id}/skip")
+async def skip_recommendation(rec_id: str, request: Request) -> dict[str, Any]:
+    svc = request.app.state.recommendation_service
+    try:
+        rec = await svc.skip(rec_id=rec_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="rec_not_found")
+    return rec
+
+
+@router.post("/api/recommendations/{rec_id}/execute")
+async def execute_recommendation(rec_id: str, request: Request, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    svc = request.app.state.recommendation_service
+    body = body or {}
+    override: dict[str, Any] = {}
+    if "entry_price" in body:
+        override["entry_price"] = body.get("entry_price")
+    if "shares" in body:
+        override["shares"] = body.get("shares")
+    try:
+        return await svc.execute(rec_id=rec_id, override=override)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="rec_not_found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

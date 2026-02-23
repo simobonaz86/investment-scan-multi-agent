@@ -10,6 +10,7 @@ import httpx
 from invest_scan import db
 from invest_scan.agents import MarketDataAgent, RiskAgent, SignalsAgent
 from invest_scan.services.portfolio_service import PortfolioService
+from invest_scan.services.recommendation_service import RecommendationService
 from invest_scan.services.universe_service import UniverseService
 from invest_scan.settings import Settings
 
@@ -79,11 +80,13 @@ class MarketScanService:
         http: httpx.AsyncClient,
         universe: UniverseService,
         portfolio: PortfolioService,
+        recommendations: RecommendationService | None = None,
     ) -> None:
         self._settings = settings
         self._http = http
         self._universe = universe
         self._portfolio = portfolio
+        self._recs = recommendations
 
         self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
         self._market = MarketDataAgent(http)
@@ -143,6 +146,17 @@ class MarketScanService:
         top_n = int(max(1, self._settings.marketscan_top_n))
         min_score = float(self._settings.marketscan_min_score)
         candidates = [x for x in items2 if float(x.get("score") or 0.0) >= min_score][:top_n]
+
+        if self._recs is not None:
+            for c in candidates:
+                try:
+                    await self._recs.upsert_from_candidate(
+                        source_scan_id=str(scan_id),
+                        candidate=c,
+                        cash_usd=cash_usd,
+                    )
+                except Exception:
+                    continue
 
         return {
             "scan_id": str(scan_id),
