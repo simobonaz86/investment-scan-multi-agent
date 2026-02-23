@@ -11,7 +11,15 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from invest_scan import db
-from invest_scan.models import ScanCreateResponse, ScanListResponse, ScanRecord, ScanRequest, ScanStatusResponse
+from invest_scan.models import (
+    ScanCreateResponse,
+    ScanListResponse,
+    ScanRecord,
+    ScanRequest,
+    ScanStatusResponse,
+    TradeCloseRequest,
+    TradeExecuteRequest,
+)
 from invest_scan.services.scan_service import scan_record_from_row
 
 
@@ -190,4 +198,45 @@ async def upload_revolut_csv(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, **parsed}
+
+
+@router.post("/api/trade/execute")
+async def trade_execute(request: Request, body: TradeExecuteRequest) -> dict[str, Any]:
+    svc = request.app.state.trade_service
+    try:
+        trade = await svc.execute(**body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return trade
+
+
+@router.post("/api/trade/close/{trade_id}")
+async def trade_close(trade_id: str, request: Request, body: TradeCloseRequest) -> dict[str, Any]:
+    svc = request.app.state.trade_service
+    try:
+        trade = await svc.close(trade_id=trade_id, **body.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=404, detail="trade_not_found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return trade
+
+
+@router.get("/api/trades")
+async def list_trades(request: Request, status: str = "all", limit: int = 50) -> dict[str, Any]:
+    svc = request.app.state.trade_service
+    st = str(status or "all").lower()
+    if st not in {"open", "closed", "all"}:
+        raise HTTPException(status_code=400, detail="invalid_status")
+    trades = await svc.list(status=st, limit=limit)
+    return {"trades": trades}
+
+
+@router.get("/api/trade/{trade_id}")
+async def get_trade(trade_id: str, request: Request) -> dict[str, Any]:
+    svc = request.app.state.trade_service
+    trade = await svc.get(trade_id=trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="trade_not_found")
+    return trade
 

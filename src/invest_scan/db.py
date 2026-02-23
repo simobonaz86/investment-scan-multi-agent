@@ -93,6 +93,65 @@ async def init_db(db_path: str) -> None:
             """
         )
         await db.execute("CREATE INDEX IF NOT EXISTS idx_market_scans_created_at ON market_scans(created_at)")
+
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trades (
+                trade_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL DEFAULT 'default',
+                ticker TEXT NOT NULL,
+                direction TEXT NOT NULL DEFAULT 'long',
+                strategy TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                entry_price REAL NOT NULL,
+                entry_date TEXT NOT NULL,
+                shares REAL NOT NULL,
+                cost_basis REAL NOT NULL,
+                stop_loss REAL,
+                take_profit REAL,
+                reason TEXT,
+                exit_price REAL,
+                exit_date TEXT,
+                exit_reason TEXT,
+                realised_pnl REAL,
+                holding_days INTEGER,
+                source_scan_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker)")
+
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recommendations (
+                rec_id TEXT PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                strategy TEXT,
+                score REAL,
+                reasons TEXT,
+                entry_price REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                shares INTEGER,
+                notional_usd REAL,
+                max_loss_usd REAL,
+                risk_reward_ratio REAL,
+                cash_after REAL,
+                status TEXT NOT NULL DEFAULT 'active',
+                source_scan_id TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                resolved_at TEXT
+            )
+            """
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_recommendations_status_expires ON recommendations(status, expires_at)"
+        )
         await db.commit()
 
 
