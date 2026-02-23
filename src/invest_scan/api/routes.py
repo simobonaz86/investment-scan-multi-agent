@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from invest_scan import db
 from invest_scan.models import (
@@ -239,4 +239,24 @@ async def get_trade(trade_id: str, request: Request) -> dict[str, Any]:
     if not trade:
         raise HTTPException(status_code=404, detail="trade_not_found")
     return trade
+
+
+@router.get("/api/journal/summary")
+async def journal_summary(request: Request) -> dict[str, Any]:
+    return await request.app.state.journal_service.summary()
+
+
+@router.get("/api/journal/export")
+async def journal_export(request: Request) -> Response:
+    export = await request.app.state.journal_service.export_closed_csv()
+    return Response(
+        content=export.data,
+        media_type=export.content_type,
+        headers={"content-disposition": f'attachment; filename="{export.filename}"'},
+    )
+
+
+@router.get("/api/journal/daily")
+async def journal_daily(request: Request) -> dict[str, Any]:
+    return await request.app.state.journal_service.daily()
 

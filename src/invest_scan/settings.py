@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     stop_atr_multiple: float = 2.0
     min_position_usd: float = 100.0
 
+    # Journal / P&L baseline
+    initial_budget: float = 1000.0
+
+    # Recommendations
+    rec_expiry_hours: int = 4
+
 
 settings = Settings()
 

@@ -14,6 +14,7 @@ from invest_scan.autoscan import autoscan_loop, market_scan_loop
 from invest_scan.api import router
 from invest_scan.settings import Settings, settings
 from invest_scan.services.market_scan_service import MarketScanService
+from invest_scan.services.journal_service import JournalService
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
@@ -56,6 +57,9 @@ def create_app(
             http=http,
             universe=app.state.universe_service,
             portfolio=app.state.portfolio_service,
+        )
+        app.state.journal_service = JournalService(
+            settings=settings_obj, http=http, portfolio=app.state.portfolio_service
         )
         autoscan_task: asyncio.Task | None = None
         market_task: asyncio.Task | None = None
