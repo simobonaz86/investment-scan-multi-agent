@@ -58,7 +58,9 @@ async function loadMarketScanStatus() {
   try {
     const st = await apiJson("/marketscan/status");
     const enabled = st.enabled ? "enabled" : "disabled";
-    el("marketscanStatus").textContent = `Market scan: ${enabled} | top_n=${st.top_n} | min_score=${st.min_score}`;
+    const mh = st.only_market_hours ? "market-hours" : "24/7";
+    el("marketscanStatus").textContent =
+      `Market scan: ${enabled} | ${mh} | interval=${st.interval_seconds}s | top_n=${st.top_n} | min_score=${st.min_score}`;
   } catch (e) {
     el("marketscanStatus").textContent = `Market scan: error (${e.message})`;
   }
@@ -133,7 +135,21 @@ async function loadSignals() {
   const recs = data.recommendations || [];
   if (!recs.length) {
     out.innerHTML = "";
+    let reason = "";
+    try {
+      const p = await apiJson("/portfolio");
+      const cash = Number(p.cash_usd || 0);
+      if (cash <= 0) {
+        reason = "Cash is $0. Set cash in the Sync tab so position sizing can produce recommendations.";
+      }
+    } catch {
+      // ignore
+    }
+    if (!reason) {
+      reason = "No active recommendations. Tap Run scan (background scans may be paused outside market hours).";
+    }
     empty.style.display = "";
+    empty.textContent = reason;
     return;
   }
 
@@ -226,6 +242,94 @@ async function loadSignals() {
       }
     });
   });
+}
+
+async function loadScans() {
+  const out = el("scansTable");
+  out.innerHTML = "Loading…";
+  const data = await apiJson("/scans?limit=25");
+  const rows = data.scans || [];
+  const pillClass = (status) => {
+    if (status === "completed") return "pill ok";
+    if (status === "failed") return "pill bad";
+    return "pill warn";
+  };
+  const html = `
+    <table>
+      <thead>
+        <tr>
+          <th>Created</th>
+          <th>Status</th>
+          <th>Tickers</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map((s) => {
+            const tickers = s.request && s.request.tickers ? s.request.tickers.join(",") : "";
+            return `
+              <tr>
+                <td>${fmtTs(s.created_at)}</td>
+                <td><span class="${pillClass(s.status)}">${s.status}</span></td>
+                <td>${tickers}</td>
+                <td><button class="btn btn-secondary" data-scan-view="${s.scan_id}">View</button></td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+  out.innerHTML = `<div class="table">${html}</div>`;
+  document.querySelectorAll("[data-scan-view]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-scan-view");
+      await loadScanDetail(id);
+    });
+  });
+}
+
+async function loadScanDetail(scanId) {
+  const box = el("scanDetailBox");
+  box.innerHTML = "Loading…";
+  const data = await apiJson(`/scan/${encodeURIComponent(scanId)}`);
+  const scan = data.scan;
+  const result = scan.result;
+  if (!result) {
+    box.innerHTML = `<pre>Status: ${scan.status}\n\nNo result yet.</pre>`;
+    return;
+  }
+  const lines = [];
+  lines.push(`Scan: ${scan.scan_id}`);
+  lines.push(`Status: ${scan.status}`);
+  lines.push(`Created: ${scan.created_at}`);
+  if (scan.error) lines.push(`Error: ${scan.error}`);
+  lines.push("");
+  for (const rep of result.reports || []) {
+    lines.push(rep.summary || rep.ticker);
+    if (rep.trade_plan && rep.trade_plan.enabled) {
+      const tp = rep.trade_plan;
+      lines.push(
+        `  trade_plan: shares=${tp.shares}, stop_loss=${tp.stop_loss}, notional_usd=${tp.notional_usd}, cash_valid=${tp.cash_valid}`,
+      );
+    } else if (rep.trade_plan) {
+      lines.push(`  trade_plan: disabled (${rep.trade_plan.reason || "n/a"})`);
+    }
+    if (rep.error) lines.push(`  error: ${rep.error}`);
+    lines.push("");
+  }
+  box.innerHTML = `<pre>${lines.join("\n")}</pre>`;
+}
+
+async function runScan() {
+  const tickers = (el("tickersInput").value || "")
+    .split(",")
+    .map((x) => x.trim().toUpperCase())
+    .filter(Boolean);
+  if (!tickers.length) return;
+  await apiJson("/scan", { method: "POST", body: JSON.stringify({ tickers, as_of: "auto" }) });
+  await loadScans();
 }
 
 async function loadPositions() {
@@ -407,6 +511,7 @@ async function refreshVisible() {
   await loadSummary();
   const tab = localStorage.getItem("activeTab") || "signals";
   if (tab === "signals") await loadSignals();
+  if (tab === "scans") await loadScans();
   if (tab === "positions") await loadPositions();
   if (tab === "journal") await loadJournal();
   if (tab === "sync") await loadPortfolio();
@@ -423,6 +528,8 @@ async function main() {
 
   el("runMarketScanBtn").addEventListener("click", () => runMarketScan().catch((e) => alert(e.message)));
   el("refreshSignalsBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
+  el("refreshScansBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
+  el("runScanBtn").addEventListener("click", () => runScan().catch((e) => alert(e.message)));
   el("refreshPositionsBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
   el("refreshJournalBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
   el("setCashBtn").addEventListener("click", () => setCash().catch((e) => alert(e.message)));
