@@ -10,12 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from invest_scan import db
-from invest_scan.autoscan import autoscan_loop
+from invest_scan.autoscan import autoscan_loop, market_scan_loop
 from invest_scan.api import router
 from invest_scan.settings import Settings, settings
+from invest_scan.services.market_scan_service import MarketScanService
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
+from invest_scan.services.universe_service import UniverseService
 
 
 def create_app(
@@ -39,15 +41,28 @@ def create_app(
         )
         app.state.settings = settings_obj
         app.state.http = http
-        app.state.ranking_service = RankingService(settings=settings_obj, http=http)
         app.state.portfolio_service = PortfolioService(settings=settings_obj)
+        app.state.universe_service = UniverseService(settings=settings_obj, http=http)
+        app.state.ranking_service = RankingService(
+            settings=settings_obj, http=http, universe=app.state.universe_service
+        )
         app.state.scan_service = ScanService(
             settings=settings_obj, http=http, portfolio_service=app.state.portfolio_service
         )
+        app.state.market_scan_service = MarketScanService(
+            settings=settings_obj,
+            http=http,
+            universe=app.state.universe_service,
+            portfolio=app.state.portfolio_service,
+        )
         autoscan_task: asyncio.Task | None = None
+        market_task: asyncio.Task | None = None
         if settings_obj.autoscan_enabled:
             autoscan_task = asyncio.create_task(autoscan_loop(app))
             app.state.autoscan_task = autoscan_task
+        if settings_obj.marketscan_enabled:
+            market_task = asyncio.create_task(market_scan_loop(app))
+            app.state.market_scan_task = market_task
         try:
             yield
         finally:
@@ -55,6 +70,12 @@ def create_app(
                 autoscan_task.cancel()
                 try:
                     await autoscan_task
+                except asyncio.CancelledError:
+                    pass
+            if market_task is not None:
+                market_task.cancel()
+                try:
+                    await market_task
                 except asyncio.CancelledError:
                     pass
             await http.aclose()

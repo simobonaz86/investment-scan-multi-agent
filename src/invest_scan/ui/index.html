@@ -10,6 +10,7 @@
     <header class="topbar">
       <div class="brand">Investment Scan (MVP)</div>
       <nav class="nav">
+        <a href="#market">Market</a>
         <a href="#scans">Scans</a>
         <a href="#portfolio">Portfolio</a>
         <a href="#rankings">Rankings</a>
@@ -18,6 +19,22 @@
     </header>
 
     <main class="container">
+      <section class="card" id="market">
+        <h2>Market opportunities</h2>
+        <div class="row subtle">
+          <div id="marketscanStatus" class="pill">Loading market scan status...</div>
+          <div class="spacer"></div>
+          <button id="runMarketScanBtn" class="btn">Run market scan</button>
+          <button id="refreshMarketScanBtn" class="btn btn-secondary">Refresh</button>
+        </div>
+        <div class="help">
+          This scans a market universe automatically (S&amp;P 500 by default), then ranks stocks you might consider
+          buying, with clear reasons and an ATR-based stop + position sizing.
+        </div>
+        <div id="marketCandidatesTable" class="table"></div>
+        <div id="marketCandidateDetail" class="box">Select a candidate to see details.</div>
+      </section>
+
       <section class="card" id="scans">
         <h2>Scans</h2>
         <div class="row">
@@ -78,7 +95,7 @@
         <h2>Rankings</h2>
         <div class="row">
           <div class="grow subtle">
-            S&amp;P 500 weekly ranking is disabled by default (enable via env).
+            Rolling 5-trading-day momentum ranking (works any day).
           </div>
           <button id="loadRankingBtn" class="btn btn-secondary">Load ranking</button>
         </div>

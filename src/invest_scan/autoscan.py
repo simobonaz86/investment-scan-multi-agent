@@ -74,3 +74,28 @@ async def autoscan_loop(app: FastAPI) -> None:
             # MVP: avoid crashing the app due to scheduler errors.
             await asyncio.sleep(min(30, interval))
 
+
+async def market_scan_loop(app: FastAPI) -> None:
+    settings: Settings = app.state.settings
+    if not settings.marketscan_enabled:
+        return
+
+    mh = _market_hours(settings)
+    interval = max(60, int(settings.marketscan_interval_seconds))
+
+    while True:
+        try:
+            if (not settings.marketscan_only_market_hours) or mh.is_open_now():
+                latest = await db.get_latest_market_scan(settings.db_path)
+                if latest and latest.get("status") in {"queued", "running"}:
+                    await asyncio.sleep(interval)
+                    continue
+
+                scan_id = await db.create_market_scan(settings.db_path)
+                asyncio.create_task(app.state.market_scan_service.run_and_persist(scan_id=scan_id))
+
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.sleep(min(30, interval))

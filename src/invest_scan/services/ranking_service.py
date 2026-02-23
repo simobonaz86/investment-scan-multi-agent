@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -9,29 +8,15 @@ import httpx
 from invest_scan.agents.market_data_agent import MarketDataAgent
 from invest_scan.settings import Settings
 from invest_scan.ttl_cache import TTLCache
-
-
-def _read_universe(path: str, *, max_tickers: int) -> list[str]:
-    p = Path(path)
-    if not p.exists():
-        return []
-    tickers: list[str] = []
-    for line in p.read_text(encoding="utf-8").splitlines():
-        t = line.strip().upper()
-        if not t or t.startswith("#"):
-            continue
-        tickers.append(t)
-        if len(tickers) >= max_tickers:
-            break
-    # de-dupe preserving order
-    return list(dict.fromkeys(tickers))
+from invest_scan.services.universe_service import UniverseService
 
 
 class RankingService:
-    def __init__(self, *, settings: Settings, http: httpx.AsyncClient) -> None:
+    def __init__(self, *, settings: Settings, http: httpx.AsyncClient, universe: UniverseService) -> None:
         self._settings = settings
         self._http = http
         self._market = MarketDataAgent(http)
+        self._universe = universe
         self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
         self._cache: TTLCache[str, dict[str, Any]] = TTLCache(ttl_seconds=3600)
 
@@ -39,13 +24,14 @@ class RankingService:
         async with self._sem:
             return await coro
 
-    async def sp500_weekly(self, *, universe_path: str, max_tickers: int = 200) -> dict[str, Any]:
-        key = f"sp500_weekly:{universe_path}:{max_tickers}"
+    async def sp500_weekly(self, *, max_tickers: int = 200) -> dict[str, Any]:
+        key = f"sp500_weekly:{max_tickers}"
         cached = self._cache.get(key)
         if cached is not None:
             return cached
 
-        tickers = _read_universe(universe_path, max_tickers=max_tickers)
+        uni = await self._universe.get_universe()
+        tickers = (uni.get("tickers") or [])[:max_tickers]
         if not tickers:
             result = {"universe_size": 0, "items": []}
             self._cache.set(key, result)

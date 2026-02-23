@@ -47,16 +47,19 @@ def _make_rss_xml() -> str:
 def app(tmp_path: Path):
     csv_body = _make_stooq_csv()
     rss_body = _make_rss_xml()
+    universe_csv = "Symbol,Name,Sector\nAAPL,Apple,Tech\nMSFT,Microsoft,Tech\n"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "stooq.com" and request.url.path == "/q/d/l/":
             return httpx.Response(200, text=csv_body)
         if request.url.host == "news.google.com":
             return httpx.Response(200, text=rss_body)
+        if request.url.host == "datahub.io" and request.url.path.endswith("/constituents.csv"):
+            return httpx.Response(200, text=universe_csv)
         return httpx.Response(404, text="not found")
 
     transport = httpx.MockTransport(handler)
-    settings = Settings(db_path=str(tmp_path / "test.db"), cache_ttl_seconds=1)
+    settings = Settings(db_path=str(tmp_path / "test.db"), cache_ttl_seconds=1, marketscan_interval_seconds=999999)
     return create_app(settings_obj=settings, transport=transport)
 
 
