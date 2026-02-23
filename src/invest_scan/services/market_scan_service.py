@@ -145,10 +145,11 @@ class MarketScanService:
 
         top_n = int(max(1, self._settings.marketscan_top_n))
         min_score = float(self._settings.marketscan_min_score)
-        candidates = [x for x in items2 if float(x.get("score") or 0.0) >= min_score][:top_n]
+        ranked = items2[:top_n]
+        candidates = [x for x in ranked if float(x.get("score") or 0.0) >= min_score]
 
         if self._recs is not None:
-            for c in candidates:
+            for c in ranked:
                 try:
                     await self._recs.upsert_from_candidate(
                         source_scan_id=str(scan_id),
@@ -164,6 +165,9 @@ class MarketScanService:
             "universe_source": uni.get("source"),
             "universe_size": len(tickers),
             "scored_size": len(items2),
+            "top_n": top_n,
+            "min_score": min_score,
+            "ranked": ranked,
             "candidates": candidates,
         }
 

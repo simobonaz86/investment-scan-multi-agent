@@ -121,41 +121,90 @@ class RecommendationService:
         reasons = candidate.get("reasons") or []
         score = candidate.get("score")
 
-        rec_id = str(uuid4())
-
         async with aiosqlite.connect(self._settings.db_path) as db:
-            await db.execute(
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
                 """
-                INSERT INTO recommendations(
-                  rec_id, ticker, strategy, score, reasons,
-                  entry_price, stop_loss, take_profit, shares, notional_usd,
-                  max_loss_usd, risk_reward_ratio, cash_after, status,
-                  source_scan_id, created_at, expires_at
-                )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                SELECT rec_id
+                FROM recommendations
+                WHERE ticker = ? AND status = 'active' AND expires_at > ?
+                ORDER BY created_at DESC
+                LIMIT 1
                 """,
-                (
-                    rec_id,
-                    ticker,
-                    strategy,
-                    float(score) if isinstance(score, (int, float)) else None,
-                    json.dumps(reasons),
-                    entry,
-                    stop,
-                    take_profit,
-                    shares_suggested,
-                    notional,
-                    max_loss,
-                    rr,
-                    cash_after,
-                    source_scan_id,
-                    created_at,
-                    expires_at,
-                ),
+                (ticker, _utcnow_iso()),
             )
+            existing = await cur.fetchone()
+
+            if existing:
+                rec_id = str(existing["rec_id"])
+                await db.execute(
+                    """
+                    UPDATE recommendations
+                    SET strategy=?,
+                        score=?,
+                        reasons=?,
+                        entry_price=?,
+                        stop_loss=?,
+                        take_profit=?,
+                        shares=?,
+                        notional_usd=?,
+                        max_loss_usd=?,
+                        risk_reward_ratio=?,
+                        cash_after=?,
+                        source_scan_id=?,
+                        expires_at=?
+                    WHERE rec_id=?
+                    """,
+                    (
+                        strategy,
+                        float(score) if isinstance(score, (int, float)) else None,
+                        json.dumps(reasons),
+                        entry,
+                        stop,
+                        take_profit,
+                        shares_suggested,
+                        notional,
+                        max_loss,
+                        rr,
+                        cash_after,
+                        source_scan_id,
+                        expires_at,
+                        rec_id,
+                    ),
+                )
+            else:
+                rec_id = str(uuid4())
+                await db.execute(
+                    """
+                    INSERT INTO recommendations(
+                      rec_id, ticker, strategy, score, reasons,
+                      entry_price, stop_loss, take_profit, shares, notional_usd,
+                      max_loss_usd, risk_reward_ratio, cash_after, status,
+                      source_scan_id, created_at, expires_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                    """,
+                    (
+                        rec_id,
+                        ticker,
+                        strategy,
+                        float(score) if isinstance(score, (int, float)) else None,
+                        json.dumps(reasons),
+                        entry,
+                        stop,
+                        take_profit,
+                        shares_suggested,
+                        notional,
+                        max_loss,
+                        rr,
+                        cash_after,
+                        source_scan_id,
+                        created_at,
+                        expires_at,
+                    ),
+                )
             await db.commit()
 
-            db.row_factory = aiosqlite.Row
             cur = await db.execute("SELECT * FROM recommendations WHERE rec_id = ?", (rec_id,))
             row = await cur.fetchone()
             return _row_to_rec(dict(row)) if row else None

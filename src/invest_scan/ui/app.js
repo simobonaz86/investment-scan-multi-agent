@@ -2,6 +2,16 @@ function el(id) {
   return document.getElementById(id);
 }
 
+const state = {
+  portfolio: null,
+  portfolioAt: 0,
+  signalsAt: 0,
+  scansAt: 0,
+  positionsAt: 0,
+  journalAt: 0,
+  summaryAt: 0,
+};
+
 async function apiJson(path, opts = {}) {
   const headers = opts.body instanceof FormData ? {} : { "content-type": "application/json" };
   const r = await fetch(path, { headers: { ...headers, ...(opts.headers || {}) }, ...opts });
@@ -54,6 +64,15 @@ function fmtCountdown(ms) {
   return `${s}s`;
 }
 
+async function getPortfolioCached({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && state.portfolio && now - state.portfolioAt < 15000) return state.portfolio;
+  const p = await apiJson("/portfolio");
+  state.portfolio = p;
+  state.portfolioAt = now;
+  return p;
+}
+
 async function loadMarketScanStatus() {
   try {
     const st = await apiJson("/marketscan/status");
@@ -64,6 +83,101 @@ async function loadMarketScanStatus() {
   } catch (e) {
     el("marketscanStatus").textContent = `Market scan: error (${e.message})`;
   }
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function plainEnglishReason(rec, cashUsd) {
+  const t = rec.ticker;
+  const entry = Number(rec.entry_price || 0);
+  const stop = Number(rec.stop_loss || 0);
+  const take = Number(rec.take_profit || 0);
+  const shares = Number(rec.shares || 0);
+  const notional = Number(rec.notional_usd || (entry * shares));
+  const riskPerShare = entry > 0 && stop > 0 ? entry - stop : 0;
+  const maxLoss = Number(rec.max_loss_usd || (shares * riskPerShare));
+  const rr = Number(rec.risk_reward_ratio || 0);
+  const reasons = (rec.reasons || []).slice(0, 6);
+  const overBudget = Number.isFinite(cashUsd) && entry > 0 && shares > 0 ? (notional > cashUsd) : false;
+  const fitShares = entry > 0 && Number.isFinite(cashUsd) ? Math.max(0, Math.floor(cashUsd / entry)) : null;
+
+  const lines = [];
+  lines.push(`BUY ${t}.`);
+  if (reasons.length) lines.push(`Why: ${reasons.join("; ")}.`);
+  if (entry > 0 && stop > 0 && take > 0) {
+    lines.push(
+      `Plan: enter around ${fmtMoney(entry)}, stop at ${fmtMoney(stop)} (risk/share ${fmtMoney(riskPerShare)}), take-profit ${fmtMoney(take)} (R/R ~ ${rr.toFixed(2)}).`,
+    );
+  }
+  if (shares > 0) lines.push(`Sizing: ${shares} shares (~${fmtMoney(notional)} notional), max loss ~${fmtMoney(maxLoss)}.`);
+  if (overBudget && fitShares != null) {
+    lines.push(
+      `Over budget: this uses ${fmtMoney(notional)} but you have ${fmtMoney(cashUsd)} cash. To fit, reduce to ~${fitShares} shares.`,
+    );
+  }
+  return lines.join(" ");
+}
+
+function renderSignalCards(recs, { cashUsd = null } = {}) {
+  return recs
+    .map((r) => {
+      const tag = (r.strategy || "manual").toLowerCase();
+      const expiresIn = fmtCountdown(msUntil(r.expires_at));
+      const reasons = (r.reasons || []).slice(0, 4);
+      const cashAfter = Number(r.cash_after);
+      const overBudget = r.cash_valid === false || (Number.isFinite(cashAfter) && cashAfter < 0);
+      const budgetPill = overBudget
+        ? `<span class="pill bad">Over budget</span>`
+        : `<span class="pill ok">Cash OK</span>`;
+      const plain = plainEnglishReason(r, Number.isFinite(cashUsd) ? cashUsd : null);
+      return `
+        <div class="action-card ${overBudget ? "over-budget" : ""}" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
+          <div class="action-top">
+            <div>
+              <div class="ticker">${escapeHtml(r.ticker)}</div>
+              <div class="subtle">
+                Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>
+                &nbsp;·&nbsp; <span class="pill ok">BUY</span>
+                &nbsp;·&nbsp; ${budgetPill}
+              </div>
+            </div>
+            <div class="tag ${tag}">${escapeHtml(tag)}</div>
+          </div>
+          <div class="meta">
+            <div class="kv"><div class="k">Score</div><div class="v">${Number(r.score || 0).toFixed(1)}</div></div>
+            <div class="kv"><div class="k">Cash after</div><div class="v">${fmtMoney(r.cash_after)}</div></div>
+            <div class="kv"><div class="k">Entry</div><div class="v">${fmtMoney(r.entry_price)}</div></div>
+            <div class="kv"><div class="k">Stop</div><div class="v">${fmtMoney(r.stop_loss)}</div></div>
+            <div class="kv"><div class="k">Shares</div><div class="v">${r.shares ?? "—"}</div></div>
+            <div class="kv"><div class="k">Max loss</div><div class="v">${fmtMoney(r.max_loss_usd)}</div></div>
+            <div class="kv"><div class="k">Take profit</div><div class="v">${fmtMoney(r.take_profit)}</div></div>
+            <div class="kv"><div class="k">Notional</div><div class="v">${fmtMoney(r.notional_usd)}</div></div>
+            <div class="kv"><div class="k">R/R</div><div class="v">${Number(r.risk_reward_ratio || 0).toFixed(2)}</div></div>
+            <div class="kv"><div class="k">Stop distance</div><div class="v">${fmtMoney(Number(r.entry_price || 0) - Number(r.stop_loss || 0))}</div></div>
+          </div>
+          <div class="reasons">
+            <div class="k">Key reasons</div>
+            <ul>${reasons.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+          </div>
+          <details class="details">
+            <summary>Deep dive (plain English)</summary>
+            <div class="plain">${escapeHtml(plain)}</div>
+          </details>
+          <div class="actions">
+            <button class="btn" data-exec="${r.rec_id}">Execute</button>
+            <button class="btn btn-secondary" data-skip="${r.rec_id}">Skip</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 async function loadSummary() {
@@ -128,80 +242,77 @@ async function confirmDialog({ title, bodyHtml, okText = "Confirm" }) {
 async function loadSignals() {
   const out = el("signalCards");
   const empty = el("signalsEmpty");
+  const now = Date.now();
+  if (now - state.signalsAt < 8000 && out.innerHTML && out.innerHTML !== "Loading…") return;
   out.innerHTML = "Loading…";
   empty.style.display = "none";
 
-  const data = await apiJson("/api/recommendations?status=active&limit=50");
-  const recs = data.recommendations || [];
+  const [data, p] = await Promise.all([
+    apiJson("/api/recommendations?status=active&limit=50"),
+    getPortfolioCached(),
+  ]);
+  let recs = data.recommendations || [];
   if (!recs.length) {
-    out.innerHTML = "";
-    let reason = "";
+    // Fallback: show the latest market scan ranked list even if recommendations table is empty.
     try {
-      const p = await apiJson("/portfolio");
-      const cash = Number(p.cash_usd || 0);
-      if (cash <= 0) {
-        reason = "Cash is $0. Set cash in the Sync tab so position sizing can produce recommendations.";
+      const latest = await apiJson("/marketscan/latest");
+      const ranked = (latest.result && (latest.result.candidates || latest.result.ranked)) ? (latest.result.candidates || latest.result.ranked) : [];
+      if (ranked.length) {
+        recs = ranked.map((c) => {
+          const tp = c.trade_plan || {};
+          const m = c.market || {};
+          const entry = Number(tp.entry_price || m.last_close || 0);
+          const stop = Number(tp.stop_loss || 0);
+          const shares = Number(tp.shares || 0);
+          const notional = entry * shares;
+          const cashAfter = Number(p.cash_usd || 0) - notional;
+          const stopDist = entry > 0 && stop > 0 ? entry - stop : 0;
+          const take = entry + (2 * stopDist);
+          const rr = stopDist > 0 ? (take - entry) / stopDist : 0;
+          return {
+            rec_id: `cand:${c.ticker}`,
+            ticker: c.ticker,
+            strategy: "manual",
+            score: c.score,
+            reasons: c.reasons || [],
+            entry_price: entry,
+            stop_loss: stop,
+            take_profit: take,
+            shares: shares,
+            notional_usd: notional,
+            max_loss_usd: stopDist * shares,
+            risk_reward_ratio: rr,
+            cash_after: cashAfter,
+            cash_valid: cashAfter >= 0,
+            expires_at: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+          };
+        });
       }
     } catch {
       // ignore
     }
-    if (!reason) {
-      reason = "No active recommendations. Tap Run scan (background scans may be paused outside market hours).";
+    if (!recs.length) {
+      out.innerHTML = "";
+      const cash = Number(p.cash_usd || 0);
+      const reason =
+        cash <= 0
+          ? "Cash is $0. Set cash in the Sync tab, then tap Run scan."
+          : "No active recommendations yet. Tap Run scan (background scans may be paused outside market hours).";
+      empty.style.display = "";
+      empty.textContent = reason;
+      return;
     }
-    empty.style.display = "";
-    empty.textContent = reason;
-    return;
   }
 
-  out.innerHTML = recs
-    .map((r) => {
-      const tag = (r.strategy || "manual").toLowerCase();
-      const expiresIn = fmtCountdown(msUntil(r.expires_at));
-      const reasons = (r.reasons || []).slice(0, 4);
-      const overBudget = r.cash_valid === false || Number(r.cash_after || 0) < 0;
-      const budgetPill = overBudget ? `<span class="pill bad">Over budget</span>` : `<span class="pill ok">Cash OK</span>`;
-      return `
-        <div class="action-card" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
-          <div class="action-top">
-            <div>
-              <div class="ticker">${r.ticker}</div>
-              <div class="subtle">
-                Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>
-                &nbsp;·&nbsp; ${budgetPill}
-              </div>
-            </div>
-            <div class="tag ${tag}">${tag}</div>
-          </div>
-          <div class="meta">
-            <div class="kv"><div class="k">Score</div><div class="v">${Number(r.score || 0).toFixed(1)}</div></div>
-            <div class="kv"><div class="k">Cash after</div><div class="v">${fmtMoney(r.cash_after)}</div></div>
-            <div class="kv"><div class="k">Entry</div><div class="v">${fmtMoney(r.entry_price)}</div></div>
-            <div class="kv"><div class="k">Stop</div><div class="v">${fmtMoney(r.stop_loss)}</div></div>
-            <div class="kv"><div class="k">Shares</div><div class="v">${r.shares ?? "—"}</div></div>
-            <div class="kv"><div class="k">Max loss</div><div class="v">${fmtMoney(r.max_loss_usd)}</div></div>
-            <div class="kv"><div class="k">Take profit</div><div class="v">${fmtMoney(r.take_profit)}</div></div>
-            <div class="kv"><div class="k">Notional</div><div class="v">${fmtMoney(r.notional_usd)}</div></div>
-            <div class="kv"><div class="k">R/R</div><div class="v">${Number(r.risk_reward_ratio || 0).toFixed(2)}</div></div>
-            <div class="kv"><div class="k">Stops at</div><div class="v">${fmtMoney(r.stop_loss)}</div></div>
-          </div>
-          <div class="reasons">
-            <div class="k">Why</div>
-            <ul>${reasons.map((x) => `<li>${x}</li>`).join("")}</ul>
-          </div>
-          <div class="actions">
-            <button class="btn" data-exec="${r.rec_id}">Execute</button>
-            <button class="btn btn-secondary" data-skip="${r.rec_id}">Skip</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+  out.innerHTML = renderSignalCards(recs, { cashUsd: Number(p.cash_usd || 0) });
+  state.signalsAt = now;
 
   document.querySelectorAll("[data-skip]").forEach((b) => {
     b.addEventListener("click", async () => {
       const id = b.getAttribute("data-skip");
       b.disabled = true;
       try {
+        if (String(id).startsWith("cand:")) return;
         await apiJson(`/api/recommendations/${encodeURIComponent(id)}/skip`, { method: "POST", body: "{}" });
         await loadSignals();
       } catch (e) {
@@ -239,10 +350,25 @@ async function loadSignals() {
       b.disabled = true;
       if (card) card.style.opacity = "0.7";
       try {
-        await apiJson(`/api/recommendations/${encodeURIComponent(id)}/execute`, {
-          method: "POST",
-          body: JSON.stringify({ entry_price: entry, shares }),
-        });
+        if (String(id).startsWith("cand:")) {
+          await apiJson("/api/trade/execute", {
+            method: "POST",
+            body: JSON.stringify({
+              ticker: rec.ticker,
+              entry_price: entry,
+              shares,
+              stop_loss: rec.stop_loss,
+              take_profit: rec.take_profit,
+              strategy: rec.strategy,
+              reason: (rec.reasons || []).join("; "),
+            }),
+          });
+        } else {
+          await apiJson(`/api/recommendations/${encodeURIComponent(id)}/execute`, {
+            method: "POST",
+            body: JSON.stringify({ entry_price: entry, shares }),
+          });
+        }
         await Promise.all([loadSummary(), loadSignals(), loadPositions(), loadPortfolio(), loadJournal()]);
       } catch (e) {
         alert(e.message);
@@ -384,7 +510,7 @@ async function loadPositions() {
           <td><span class="${pnlCls}">${pnlTxt}</span></td>
           <td>${stop}</td>
           <td>${daysHeld}</td>
-          <td><button class="btn btn-secondary" data-close="${t.trade_id}">Close</button></td>
+          <td><button class="btn btn-secondary" data-close="${t.trade_id}">Sell</button></td>
         </tr>
       `;
     })
@@ -472,7 +598,7 @@ async function loadJournal() {
 async function loadPortfolio() {
   const box = el("portfolioBox");
   box.textContent = "Loading…";
-  const p = await apiJson("/portfolio");
+  const p = await getPortfolioCached({ force: true });
   const positions = p.positions || [];
   const posRows = positions
     .map((x) => `<tr><td>${x.ticker}</td><td>${x.quantity}</td><td>${x.avg_price ?? ""}</td><td>${fmtTs(x.updated_at)}</td></tr>`)
@@ -492,6 +618,7 @@ async function loadPortfolio() {
 async function setCash() {
   const v = parseFloat(el("cashInput").value || "0");
   await apiJson("/portfolio/cash", { method: "POST", body: JSON.stringify({ cash_usd: v }) });
+  state.portfolioAt = 0;
   await Promise.all([loadSummary(), loadPortfolio()]);
 }
 
@@ -502,6 +629,7 @@ async function uploadCsv() {
   const fd = new FormData();
   fd.append("file", fileInput.files[0]);
   await apiJson(`/portfolio/revolut/upload?mode=${encodeURIComponent(mode)}`, { method: "POST", body: fd });
+  state.portfolioAt = 0;
   await Promise.all([loadSummary(), loadPortfolio()]);
 }
 

@@ -169,18 +169,29 @@ h2 { margin: 0 0 10px; font-size: 18px; }
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
+.action-card.over-budget { border-color: #fecaca; background: #fff7f7; }
 .action-top { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .ticker { font-weight: 1000; font-size: 16px; letter-spacing: 0.2px; }
 .tag { font-size: 12px; font-weight: 900; padding: 5px 10px; border-radius: 999px; border: 1px solid #e2e8f0; background: #f1f5f9; }
 .tag.momentum { background: #ecfeff; border-color: #a5f3fc; color: #155e75; }
 .tag.reversion { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
 .tag.manual { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
+.tag.buy { background: #dcfce7; border-color: #86efac; color: #166534; }
 .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .kv { padding: 8px 10px; border-radius: 10px; background: #f8fafc; border: 1px solid #eef2f7; }
 .k { font-size: 11px; color: #64748b; font-weight: 800; }
 .v { font-size: 13px; font-weight: 900; margin-top: 2px; }
 .reasons { margin-top: 10px; color: #334155; font-size: 13px; }
 .reasons ul { margin: 8px 0 0; padding-left: 18px; }
+.details {
+  margin-top: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fbfdff;
+}
+.details summary { cursor: pointer; font-weight: 900; color: #0f172a; }
+.details .plain { margin-top: 8px; color: #334155; font-size: 13px; }
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
 
 .modal {
