@@ -25,17 +25,27 @@ function showFatal(msg) {
 async function apiJson(path, opts = {}) {
   const headers = opts.body instanceof FormData ? {} : { "content-type": "application/json" };
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const t = controller ? setTimeout(() => controller.abort(), 15000) : null;
-  let r;
-  try {
-    r = await fetch(path, {
-      headers: { ...headers, ...(opts.headers || {}) },
-      ...opts,
-      signal: controller ? controller.signal : undefined,
-    });
-  } finally {
-    if (t) clearTimeout(t);
-  }
+  const timeoutMs = 15000;
+  const fetchPromise = fetch(path, {
+    headers: { ...headers, ...(opts.headers || {}) },
+    ...opts,
+    signal: controller ? controller.signal : undefined,
+  });
+
+  const timeoutPromise = new Promise((_, reject) => {
+    const id = setTimeout(() => {
+      try {
+        if (controller) controller.abort();
+      } catch {
+        // ignore
+      }
+      reject(new Error(`request_timeout_after_${timeoutMs}ms`));
+    }, timeoutMs);
+    // Avoid leaking the timer if fetch wins.
+    fetchPromise.finally(() => clearTimeout(id));
+  });
+
+  const r = await Promise.race([fetchPromise, timeoutPromise]);
   const isJson = (r.headers.get("content-type") || "").includes("application/json");
   const body = isJson ? await r.json() : await r.text();
   if (!r.ok) {
@@ -803,6 +813,12 @@ async function main() {
     const r = evt.reason;
     showFatal(`Unhandled promise rejection: ${r && r.message ? r.message : String(r)}`);
   });
+
+  try {
+    el("lastUpdated").textContent = "Loading…";
+  } catch {
+    // ignore
+  }
 
   document.querySelectorAll("[data-tab]").forEach((b) => {
     b.addEventListener("click", () => {
