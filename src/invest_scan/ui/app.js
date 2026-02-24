@@ -110,12 +110,13 @@ function renderMarketScanStatus(st) {
 }
 
 function escapeHtml(s) {
+  // Avoid String.prototype.replaceAll (older mobile browsers).
   return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function plainEnglishReason(rec, cashUsd) {
@@ -133,11 +134,11 @@ function plainEnglishReason(rec, cashUsd) {
   const fitShares = entry > 0 && Number.isFinite(cashUsd) ? Math.max(0, Math.floor(cashUsd / entry)) : null;
 
   const lines = [];
-    const rating = rec.rating ? String(rec.rating) : null;
-    const mechs = (rec.mechanisms || []).slice(0, 6);
-    lines.push(`BUY ${t}.`);
-    if (rating) lines.push(`Rating: ${rating}.`);
-    if (mechs.length) lines.push(`Mechanisms: ${mechs.join(", ")}.`);
+  const rating = rec.rating ? String(rec.rating) : null;
+  const mechs = (rec.mechanisms || []).slice(0, 6);
+  lines.push(`BUY ${t}.`);
+  if (rating) lines.push(`Rating: ${rating}.`);
+  if (mechs.length) lines.push(`Mechanisms: ${mechs.join(", ")}.`);
   if (rec.strategy) {
     if (rec.strategy === "momentum") lines.push("Style: momentum (trend-following).");
     if (rec.strategy === "reversion") lines.push("Style: mean reversion (bounce from oversold).");
@@ -485,19 +486,29 @@ async function loadScans({ dashboard = null, force = false } = {}) {
 async function loadScanDetail(scanId) {
   const box = el("scanDetailBox");
   box.innerHTML = "Loading…";
-  const data = await apiJson(`/scan/${encodeURIComponent(scanId)}`);
-  const scan = data.scan;
-  const result = scan.result;
-  if (!result) {
-    box.innerHTML = `<pre>Status: ${scan.status}\n\nNo result yet.</pre>`;
+  let scan = null;
+  for (let i = 0; i < 40; i++) {
+    const data = await apiJson(`/scan/${encodeURIComponent(scanId)}`);
+    scan = data.scan;
+    if (scan && (scan.status === "completed" || scan.status === "failed")) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!scan) {
+    box.innerHTML = `<pre>Scan not found.</pre>`;
     return;
   }
+  const result = scan.result;
   const lines = [];
   lines.push(`Scan: ${scan.scan_id}`);
   lines.push(`Status: ${scan.status}`);
   lines.push(`Created: ${scan.created_at}`);
   if (scan.error) lines.push(`Error: ${scan.error}`);
   lines.push("");
+  if (!result) {
+    lines.push("No result yet.");
+    box.innerHTML = `<pre>${lines.join("\n")}</pre>`;
+    return;
+  }
   for (const rep of result.reports || []) {
     lines.push(rep.summary || rep.ticker);
     if (rep.trade_plan && rep.trade_plan.enabled) {
@@ -520,8 +531,11 @@ async function runScan() {
     .map((x) => x.trim().toUpperCase())
     .filter(Boolean);
   if (!tickers.length) return;
-  await apiJson("/scan", { method: "POST", body: JSON.stringify({ tickers, as_of: "auto" }) });
-  await loadScans();
+  const created = await apiJson("/scan", { method: "POST", body: JSON.stringify({ tickers, as_of: "auto" }) });
+  await loadScans({ force: true });
+  if (created && created.scan_id) {
+    await loadScanDetail(created.scan_id);
+  }
 }
 
 async function loadPositions({ dashboard = null, force = false } = {}) {
@@ -717,6 +731,26 @@ async function refreshVisible({ force = false } = {}) {
   const dash = await getDashboardCached({ force });
   renderSummary(dash.journal_summary);
   renderMarketScanStatus(dash.marketscan_status);
+  const msi = el("marketScanInfo");
+  const latest = dash.marketscan_latest;
+  if (msi) {
+    if (!latest) {
+      msi.style.display = "";
+      msi.innerHTML = `<pre>No market scan has been run yet.\n\nTap “Run scan”.</pre>`;
+    } else if (latest.status !== "completed") {
+      msi.style.display = "";
+      msi.innerHTML = `<pre>Last market scan status: ${latest.status}\nCreated: ${latest.created_at}\nError: ${latest.error || "—"}</pre>`;
+    } else {
+      const res = latest.result || {};
+      const scored = res.scored_size ?? "—";
+      const uni = res.universe_size ?? "—";
+      const ranked = (res.ranked || []).length;
+      const cand = (res.candidates || []).length;
+      const err = latest.error || "—";
+      msi.style.display = "";
+      msi.innerHTML = `<pre>Last market scan: completed\nUniverse: ${uni}\nScored: ${scored}\nRanked: ${ranked}\nCandidates: ${cand}\nError: ${err}</pre>`;
+    }
+  }
   const tab = localStorage.getItem("activeTab") || "signals";
   if (tab === "signals") await loadSignals({ dashboard: dash, force });
   if (tab === "scans") await loadScans({ dashboard: dash, force });
