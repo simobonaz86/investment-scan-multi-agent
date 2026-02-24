@@ -133,7 +133,11 @@ function plainEnglishReason(rec, cashUsd) {
   const fitShares = entry > 0 && Number.isFinite(cashUsd) ? Math.max(0, Math.floor(cashUsd / entry)) : null;
 
   const lines = [];
-  lines.push(`BUY ${t}.`);
+    const rating = rec.rating ? String(rec.rating) : null;
+    const mechs = (rec.mechanisms || []).slice(0, 6);
+    lines.push(`BUY ${t}.`);
+    if (rating) lines.push(`Rating: ${rating}.`);
+    if (mechs.length) lines.push(`Mechanisms: ${mechs.join(", ")}.`);
   if (rec.strategy) {
     if (rec.strategy === "momentum") lines.push("Style: momentum (trend-following).");
     if (rec.strategy === "reversion") lines.push("Style: mean reversion (bounce from oversold).");
@@ -172,6 +176,21 @@ function addSkippedSignalId(id) {
   localStorage.setItem("skippedSignals", JSON.stringify(Array.from(s).slice(-500)));
 }
 
+function ratingPill(rating) {
+  const r = String(rating || "").toLowerCase();
+  if (!r) return "";
+  if (r.includes("very")) return `<span class="pill ok">Very Strong</span>`;
+  if (r.includes("strong")) return `<span class="pill warn">Strong</span>`;
+  if (r.includes("light")) return `<span class="pill warn">Light</span>`;
+  return `<span class="pill bad">Not strong</span>`;
+}
+
+function mechanismChips(mechanisms) {
+  const ms = Array.isArray(mechanisms) ? mechanisms.slice(0, 4) : [];
+  if (!ms.length) return "";
+  return ms.map((m) => `<span class="pill">${escapeHtml(m)}</span>`).join(" ");
+}
+
 function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
   const skipped = mode === "active" ? getSkippedSignalIds() : new Set();
   return recs
@@ -199,6 +218,8 @@ function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
         mode === "history"
           ? `Created ${fmtTs(r.created_at)}`
           : `Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>`;
+      const rating = ratingPill(r.rating);
+      const chips = mechanismChips(r.mechanisms);
       return `
         <div class="action-card ${overBudget ? "over-budget" : ""}" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
           <div class="action-top">
@@ -207,9 +228,11 @@ function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
               <div class="subtle">
                 ${timingLine}
                 &nbsp;·&nbsp; <span class="pill ok">BUY</span>
+                ${rating ? "&nbsp;·&nbsp;" + rating : ""}
                 &nbsp;·&nbsp; ${budgetPill}
                 &nbsp;·&nbsp; ${statusPill}
               </div>
+              ${chips ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">${chips}</div>` : ""}
             </div>
             <div class="tag ${tag}">${escapeHtml(tag)}</div>
           </div>

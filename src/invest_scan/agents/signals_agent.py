@@ -49,6 +49,37 @@ def _stdev(values: list[float], window: int) -> float | None:
     return float(sd)
 
 
+def _bollinger_width_pct(values: list[float], window: int = 20) -> float | None:
+    """
+    (Upper - Lower) / Middle where:
+      Middle = SMA(window)
+      Upper/Lower = Middle +/- 2*stdev(window)
+    """
+    mid = _sma(values, window)
+    sd = _stdev(values, window)
+    if mid is None or sd is None or mid == 0:
+        return None
+    # Upper - Lower = 4 * sd
+    return float((4.0 * sd) / mid)
+
+
+def _bollinger_width_percentile(values: list[float], *, window: int = 20, lookback: int = 60) -> float | None:
+    if window <= 1 or lookback <= 1 or len(values) < window + 2:
+        return None
+    widths: list[float] = []
+    start = max(window, len(values) - lookback)
+    for i in range(start, len(values) + 1):
+        w = _bollinger_width_pct(values[:i], window=window)
+        if w is None:
+            continue
+        widths.append(float(w))
+    if len(widths) < 5:
+        return None
+    last = widths[-1]
+    # percentile rank in [0,1]
+    return float(sum(1 for x in widths if x <= last) / len(widths))
+
+
 class SignalsAgent:
     def analyze(
         self, closes: list[float], *, market: dict[str, Any] | None = None
@@ -66,6 +97,8 @@ class SignalsAgent:
         lower_band = (
             (middle_band - (2.0 * sd20)) if (middle_band is not None and sd20 is not None) else None
         )
+        bollinger_width_pct = _bollinger_width_pct(closes, window=20)
+        bollinger_width_percentile_60 = _bollinger_width_percentile(closes, window=20, lookback=60)
         bollinger_position = None
         if last is not None and upper_band is not None and lower_band is not None:
             denom = upper_band - lower_band
@@ -126,6 +159,8 @@ class SignalsAgent:
             "bollinger_upper": upper_band,
             "bollinger_lower": lower_band,
             "bollinger_position": bollinger_position,
+            "bollinger_width_pct": bollinger_width_pct,
+            "bollinger_width_percentile_60": bollinger_width_percentile_60,
             "trend": trend,
             "momentum_score": momentum_score,
             "mean_reversion": mean_reversion,

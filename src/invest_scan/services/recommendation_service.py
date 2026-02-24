@@ -32,7 +32,9 @@ def _row_to_rec(row: dict[str, Any]) -> dict[str, Any]:
         "rec_id": row["rec_id"],
         "ticker": row["ticker"],
         "strategy": row.get("strategy"),
+        "rating": row.get("rating"),
         "score": float(row["score"]) if row.get("score") is not None else None,
+        "mechanisms": json.loads(row["mechanisms"]) if row.get("mechanisms") else [],
         "reasons": json.loads(row["reasons"]) if row.get("reasons") else [],
         "entry_price": float(row["entry_price"]) if row.get("entry_price") is not None else None,
         "stop_loss": float(row["stop_loss"]) if row.get("stop_loss") is not None else None,
@@ -120,24 +122,28 @@ class RecommendationService:
         expires_at = (now + timedelta(hours=int(self._settings.rec_expiry_hours))).isoformat()
         reasons = candidate.get("reasons") or []
         score = candidate.get("score")
+        mechanisms = candidate.get("mechanisms") or []
+        rating = candidate.get("rating")
 
         rec_id = str(uuid4())
         async with aiosqlite.connect(self._settings.db_path) as db:
             await db.execute(
                 """
                 INSERT INTO recommendations(
-                  rec_id, ticker, strategy, score, reasons,
+                  rec_id, ticker, strategy, rating, score, mechanisms, reasons,
                   entry_price, stop_loss, take_profit, shares, notional_usd,
                   max_loss_usd, risk_reward_ratio, cash_after, status,
                   source_scan_id, created_at, expires_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
                 """,
                 (
                     rec_id,
                     ticker,
                     strategy,
+                    rating,
                     float(score) if isinstance(score, (int, float)) else None,
+                    json.dumps(mechanisms),
                     json.dumps(reasons),
                     entry,
                     stop,

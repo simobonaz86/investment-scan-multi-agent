@@ -131,7 +131,9 @@ async def init_db(db_path: str) -> None:
                 rec_id TEXT PRIMARY KEY,
                 ticker TEXT NOT NULL,
                 strategy TEXT,
+                rating TEXT,
                 score REAL,
+                mechanisms TEXT,
                 reasons TEXT,
                 entry_price REAL,
                 stop_loss REAL,
@@ -152,6 +154,10 @@ async def init_db(db_path: str) -> None:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_recommendations_status_expires ON recommendations(status, expires_at)"
         )
+
+        # Lightweight migrations for existing deployments
+        await _ensure_column(db, table="recommendations", column="rating", column_def="TEXT")
+        await _ensure_column(db, table="recommendations", column="mechanisms", column_def="TEXT")
         await db.commit()
 
 
@@ -350,4 +356,13 @@ async def list_market_scans(db_path: str, limit: int = 20) -> list[dict[str, Any
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+
+async def _ensure_column(db: aiosqlite.Connection, *, table: str, column: str, column_def: str) -> None:
+    cur = await db.execute(f"PRAGMA table_info({table})")  # noqa: S608
+    rows = await cur.fetchall()
+    existing = {r[1] for r in rows}  # (cid, name, type, notnull, dflt_value, pk)
+    if column in existing:
+        return
+    await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")  # noqa: S608
 

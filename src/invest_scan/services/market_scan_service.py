@@ -19,14 +19,36 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _score_and_reasons(*, market: dict[str, Any], signals: dict[str, Any]) -> tuple[float, list[str]]:
+def _rating(score: float, mechanisms: list[str]) -> str:
+    mech_count = len(set(mechanisms))
+    s = float(score)
+    if s >= 20.0 and mech_count >= 2:
+        return "Very Strong"
+    if s >= 14.0:
+        return "Strong"
+    if s >= 8.0:
+        return "Light"
+    return "Not strong"
+
+
+def _score_and_reasons(*, market: dict[str, Any], signals: dict[str, Any]) -> dict[str, Any]:
     score = 0.0
     reasons: list[str] = []
+    mechanisms: list[str] = []
 
     trend = signals.get("trend")
+    sma20 = signals.get("sma20")
+    sma50 = signals.get("sma50")
+    last = signals.get("last")
+    if isinstance(sma20, (int, float)) and isinstance(sma50, (int, float)) and float(sma20) > float(sma50):
+        score += 4
+        reasons.append("uptrend (SMA20 above SMA50)")
+        mechanisms.append("trend_following")
+
     if trend == "bullish":
-        score += 10
-        reasons.append("bullish trend (price > SMA20 > SMA50)")
+        score += 6
+        reasons.append("strong uptrend (price > SMA20 > SMA50)")
+        mechanisms.append("trend_following_strong")
     elif trend == "bearish":
         score -= 10
         reasons.append("bearish trend (price < SMA20 < SMA50)")
@@ -36,40 +58,83 @@ def _score_and_reasons(*, market: dict[str, Any], signals: dict[str, Any]) -> tu
         score += float(mom) * 100.0
         if mom > 0:
             reasons.append(f"positive momentum ({mom:.2%})")
+            mechanisms.append("momentum")
         else:
             reasons.append(f"negative momentum ({mom:.2%})")
 
+    # Trend pullback: price below SMA20 but above SMA50 in an uptrend.
+    if (
+        isinstance(last, (int, float))
+        and isinstance(sma20, (int, float))
+        and isinstance(sma50, (int, float))
+        and float(sma20) > float(sma50)
+        and float(last) < float(sma20)
+        and float(last) > float(sma50)
+    ):
+        score += 6
+        reasons.append("pullback in uptrend (price below SMA20 but above SMA50)")
+        mechanisms.append("pullback_in_uptrend")
+
+    # Volatility squeeze (Bollinger width unusually low).
+    bw = signals.get("bollinger_width_pct")
+    bw_pct = signals.get("bollinger_width_percentile_60")
+    squeeze = False
+    if isinstance(bw, (int, float)) and float(bw) <= 0.06:
+        squeeze = True
+    if isinstance(bw_pct, (int, float)) and float(bw_pct) <= 0.20:
+        squeeze = True
+    if squeeze:
+        score += 4
+        reasons.append("volatility squeeze (tight Bollinger Bands)")
+        mechanisms.append("volatility_squeeze")
+        if trend == "bullish" or (
+            isinstance(sma20, (int, float)) and isinstance(sma50, (int, float)) and float(sma20) > float(sma50)
+        ):
+            score += 2
+            reasons.append("squeeze aligned with uptrend")
+
     mr = signals.get("mean_reversion")
     if mr == "oversold":
-        score += 6
+        score += 4
         reasons.append("mean reversion: oversold")
+        mechanisms.append("mean_reversion")
     elif mr == "overbought":
         score -= 6
         reasons.append("mean reversion: overbought")
+        mechanisms.append("mean_reversion_overbought")
 
     bp = signals.get("bollinger_position")
     if isinstance(bp, (int, float)):
         if float(bp) < 0.05:
             score += 3
             reasons.append("price below lower Bollinger Band")
+            mechanisms.append("bollinger_extreme_low")
         elif float(bp) > 0.95:
             score -= 3
             reasons.append("price above upper Bollinger Band")
+            mechanisms.append("bollinger_extreme_high")
 
     if market.get("volume_spike") is True:
-        score += 4
+        score += 2
         r = market.get("volume_spike_ratio")
         if isinstance(r, (int, float)):
             reasons.append(f"volume spike ({float(r):.1f}x 20d avg)")
         else:
             reasons.append("volume spike")
+        mechanisms.append("volume_spike")
 
     vol = market.get("volatility_60d_ann")
     if isinstance(vol, (int, float)) and float(vol) > 0.6:
         score -= 3
         reasons.append("very high volatility")
 
-    return score, reasons
+    mechs = list(dict.fromkeys(mechanisms))
+    return {
+        "score": float(score),
+        "reasons": reasons,
+        "mechanisms": mechs,
+        "rating": _rating(score, mechs),
+    }
 
 
 class MarketScanService:
@@ -117,7 +182,9 @@ class MarketScanService:
                 market2, series = await self._limited(self._market.fetch_and_analyze(t))
                 closes = series.get("closes") or []
                 signals = self._signals.analyze(closes, market=market2)
-                score, reasons = _score_and_reasons(market=market2, signals=signals)
+                scored = _score_and_reasons(market=market2, signals=signals)
+                score = float(scored["score"])
+                reasons = list(scored["reasons"])
                 trade_plan = self._risk.plan_trade(
                     cash_usd=cash_usd,
                     entry_price=market2.get("last_close"),
@@ -130,6 +197,8 @@ class MarketScanService:
                     "ticker": t,
                     "score": score,
                     "reasons": reasons,
+                    "rating": scored.get("rating"),
+                    "mechanisms": scored.get("mechanisms") or [],
                     "market": market2,
                     "signals": signals,
                     "trade_plan": trade_plan,
