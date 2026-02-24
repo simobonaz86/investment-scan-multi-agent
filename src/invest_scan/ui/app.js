@@ -172,8 +172,8 @@ function addSkippedSignalId(id) {
   localStorage.setItem("skippedSignals", JSON.stringify(Array.from(s).slice(-500)));
 }
 
-function renderSignalCards(recs, { cashUsd = null } = {}) {
-  const skipped = getSkippedSignalIds();
+function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
+  const skipped = mode === "active" ? getSkippedSignalIds() : new Set();
   return recs
     .filter((r) => !skipped.has(String(r.rec_id)))
     .map((r) => {
@@ -186,15 +186,29 @@ function renderSignalCards(recs, { cashUsd = null } = {}) {
         ? `<span class="pill bad">Over budget</span>`
         : `<span class="pill ok">Cash OK</span>`;
       const plain = plainEnglishReason(r, Number.isFinite(cashUsd) ? cashUsd : null);
+      const status = (r.status || (mode === "history" ? "history" : "active")).toLowerCase();
+      const statusPill =
+        status === "executed"
+          ? `<span class="pill ok">Executed</span>`
+          : status === "skipped"
+            ? `<span class="pill warn">Skipped</span>`
+            : status === "expired"
+              ? `<span class="pill bad">Expired</span>`
+              : `<span class="pill ok">Active</span>`;
+      const timingLine =
+        mode === "history"
+          ? `Created ${fmtTs(r.created_at)}`
+          : `Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>`;
       return `
         <div class="action-card ${overBudget ? "over-budget" : ""}" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
           <div class="action-top">
             <div>
               <div class="ticker">${escapeHtml(r.ticker)}</div>
               <div class="subtle">
-                Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>
+                ${timingLine}
                 &nbsp;·&nbsp; <span class="pill ok">BUY</span>
                 &nbsp;·&nbsp; ${budgetPill}
+                &nbsp;·&nbsp; ${statusPill}
               </div>
             </div>
             <div class="tag ${tag}">${escapeHtml(tag)}</div>
@@ -219,10 +233,17 @@ function renderSignalCards(recs, { cashUsd = null } = {}) {
             <summary>Deep dive (plain English)</summary>
             <div class="plain">${escapeHtml(plain)}</div>
           </details>
-          <div class="actions">
-            <button class="btn" data-exec="${r.rec_id}">Execute</button>
-            <button class="btn btn-secondary" data-skip="${r.rec_id}">Skip</button>
-          </div>
+          ${
+            mode === "active"
+              ? `<div class="actions">
+                   <button class="btn" data-exec="${r.rec_id}">Execute</button>
+                   <button class="btn btn-secondary" data-skip="${r.rec_id}">Skip</button>
+                 </div>`
+              : `<div class="actions">
+                   <button class="btn btn-secondary" data-copy="${r.rec_id}">Copy ticker</button>
+                   <button class="btn btn-secondary" data-hide="${r.rec_id}">Hide</button>
+                 </div>`
+          }
         </div>
       `;
     })
@@ -302,20 +323,32 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
   out.innerHTML = "Loading…";
   empty.style.display = "none";
 
+  const mode = localStorage.getItem("signalsMode") || "active";
   let recs = [];
   let p = null;
   let msl = null;
   if (dashboard) {
-    recs = dashboard.recommendations || [];
+    recs = mode === "history" ? (dashboard.recommendations_history || []) : (dashboard.recommendations || []);
     p = dashboard.portfolio || null;
     msl = dashboard.marketscan_latest || null;
   } else {
+    const endpoint =
+      mode === "history"
+        ? "/api/recommendations/history?limit=200"
+        : "/api/recommendations?status=active&limit=50";
     const [data, port] = await Promise.all([
-      apiJson("/api/recommendations?status=active&limit=50"),
+      apiJson(endpoint),
       getPortfolioCached(),
     ]);
     recs = data.recommendations || [];
     p = port;
+  }
+
+  if (mode === "history") {
+    out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "history" });
+    state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
+    state.signalsAt = now;
+    return;
   }
 
   if (!recs.length) {
@@ -373,7 +406,7 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
     }
   }
 
-  out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0) });
+  out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "active" });
   state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
   state.signalsAt = now;
 }
@@ -682,10 +715,37 @@ async function main() {
   el("signalCards").addEventListener("click", async (evt) => {
     const execBtn = evt.target.closest("[data-exec]");
     const skipBtn = evt.target.closest("[data-skip]");
-    if (!execBtn && !skipBtn) return;
+    const copyBtn = evt.target.closest("[data-copy]");
+    const hideBtn = evt.target.closest("[data-hide]");
+    if (!execBtn && !skipBtn && !copyBtn && !hideBtn) return;
 
-    const id = (execBtn || skipBtn).getAttribute(execBtn ? "data-exec" : "data-skip");
+    const srcEl = execBtn || skipBtn || copyBtn || hideBtn;
+    const id =
+      (execBtn && execBtn.getAttribute("data-exec")) ||
+      (skipBtn && skipBtn.getAttribute("data-skip")) ||
+      (copyBtn && copyBtn.getAttribute("data-copy")) ||
+      (hideBtn && hideBtn.getAttribute("data-hide"));
     if (!id) return;
+
+    if (copyBtn) {
+      const rec = state.signalsById.get(String(id));
+      if (!rec) return;
+      const text = String(rec.ticker || "");
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // fallback
+        prompt("Copy ticker", text);
+      }
+      return;
+    }
+
+    if (hideBtn) {
+      addSkippedSignalId(id);
+      state.dashboardAt = 0;
+      await refreshVisible({ force: true });
+      return;
+    }
 
     if (skipBtn) {
       skipBtn.disabled = true;
@@ -761,6 +821,24 @@ async function main() {
     }
   });
 
+  const setSignalsMode = (mode) => {
+    localStorage.setItem("signalsMode", mode);
+    el("signalsModeActive").classList.toggle("is-active", mode === "active");
+    el("signalsModeHistory").classList.toggle("is-active", mode === "history");
+  };
+  el("signalsModeActive").addEventListener("click", () => {
+    setSignalsMode("active");
+    refreshVisible({ force: true }).catch((e) => alert(e.message));
+  });
+  el("signalsModeHistory").addEventListener("click", () => {
+    setSignalsMode("history");
+    refreshVisible({ force: true }).catch((e) => alert(e.message));
+  });
+  el("clearSkippedBtn").addEventListener("click", () => {
+    localStorage.removeItem("skippedSignals");
+    refreshVisible({ force: true }).catch((e) => alert(e.message));
+  });
+
   el("runMarketScanBtn").addEventListener("click", () => runMarketScan().catch((e) => alert(e.message)));
   el("refreshSignalsBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
   el("refreshScansBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
@@ -771,6 +849,7 @@ async function main() {
   el("uploadCsvBtn").addEventListener("click", () => uploadCsv().catch((e) => alert(e.message)));
 
   setTab(localStorage.getItem("activeTab") || "signals");
+  setSignalsMode(localStorage.getItem("signalsMode") || "active");
   await refreshVisible({ force: true });
 
   setInterval(() => {

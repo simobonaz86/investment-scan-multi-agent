@@ -271,6 +271,13 @@ async def list_recommendations(request: Request, status: str = "active", limit: 
     return {"recommendations": recs}
 
 
+@router.get("/api/recommendations/history")
+async def list_recommendations_history(request: Request, limit: int = 200) -> dict[str, Any]:
+    svc = request.app.state.recommendation_service
+    recs = await svc.list_history(limit=limit)
+    return {"recommendations": recs}
+
+
 @router.post("/api/recommendations/{rec_id}/skip")
 async def skip_recommendation(rec_id: str, request: Request) -> dict[str, Any]:
     svc = request.app.state.recommendation_service
@@ -302,11 +309,16 @@ async def execute_recommendation(rec_id: str, request: Request, body: dict[str, 
 async def api_dashboard(
     request: Request,
     rec_limit: int = 50,
+    rec_history_limit: int = 200,
     scans_limit: int = 25,
     trades_open_limit: int = 200,
     trades_closed_limit: int = 200,
 ) -> dict[str, Any]:
     s = request.app.state.settings
+    try:
+        await request.app.state.recommendation_service.expire_due()
+    except Exception:
+        pass
 
     async def portfolio():
         p = await request.app.state.portfolio_service.get_portfolio()
@@ -317,6 +329,9 @@ async def api_dashboard(
 
     async def recommendations():
         return await request.app.state.recommendation_service.list(status="active", limit=rec_limit)
+
+    async def recommendations_history():
+        return await request.app.state.recommendation_service.list_history(limit=rec_history_limit)
 
     async def trades_open():
         return await request.app.state.trade_service.list(status="open", limit=trades_open_limit)
@@ -357,6 +372,7 @@ async def api_dashboard(
         p,
         js,
         recs,
+        rec_hist,
         to,
         tc,
         sc,
@@ -366,6 +382,7 @@ async def api_dashboard(
         portfolio(),
         journal_summary(),
         recommendations(),
+        recommendations_history(),
         trades_open(),
         trades_closed(),
         scans(),
@@ -377,6 +394,7 @@ async def api_dashboard(
         "portfolio": p,
         "journal_summary": js,
         "recommendations": recs,
+        "recommendations_history": rec_hist,
         "trades_open": to,
         "trades_closed": tc,
         "scans": sc,

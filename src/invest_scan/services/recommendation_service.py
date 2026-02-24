@@ -121,90 +121,40 @@ class RecommendationService:
         reasons = candidate.get("reasons") or []
         score = candidate.get("score")
 
+        rec_id = str(uuid4())
         async with aiosqlite.connect(self._settings.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(
+            await db.execute(
                 """
-                SELECT rec_id
-                FROM recommendations
-                WHERE ticker = ? AND status = 'active' AND expires_at > ?
-                ORDER BY created_at DESC
-                LIMIT 1
+                INSERT INTO recommendations(
+                  rec_id, ticker, strategy, score, reasons,
+                  entry_price, stop_loss, take_profit, shares, notional_usd,
+                  max_loss_usd, risk_reward_ratio, cash_after, status,
+                  source_scan_id, created_at, expires_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
                 """,
-                (ticker, _utcnow_iso()),
+                (
+                    rec_id,
+                    ticker,
+                    strategy,
+                    float(score) if isinstance(score, (int, float)) else None,
+                    json.dumps(reasons),
+                    entry,
+                    stop,
+                    take_profit,
+                    shares_suggested,
+                    notional,
+                    max_loss,
+                    rr,
+                    cash_after,
+                    source_scan_id,
+                    created_at,
+                    expires_at,
+                ),
             )
-            existing = await cur.fetchone()
-
-            if existing:
-                rec_id = str(existing["rec_id"])
-                await db.execute(
-                    """
-                    UPDATE recommendations
-                    SET strategy=?,
-                        score=?,
-                        reasons=?,
-                        entry_price=?,
-                        stop_loss=?,
-                        take_profit=?,
-                        shares=?,
-                        notional_usd=?,
-                        max_loss_usd=?,
-                        risk_reward_ratio=?,
-                        cash_after=?,
-                        source_scan_id=?,
-                        expires_at=?
-                    WHERE rec_id=?
-                    """,
-                    (
-                        strategy,
-                        float(score) if isinstance(score, (int, float)) else None,
-                        json.dumps(reasons),
-                        entry,
-                        stop,
-                        take_profit,
-                        shares_suggested,
-                        notional,
-                        max_loss,
-                        rr,
-                        cash_after,
-                        source_scan_id,
-                        expires_at,
-                        rec_id,
-                    ),
-                )
-            else:
-                rec_id = str(uuid4())
-                await db.execute(
-                    """
-                    INSERT INTO recommendations(
-                      rec_id, ticker, strategy, score, reasons,
-                      entry_price, stop_loss, take_profit, shares, notional_usd,
-                      max_loss_usd, risk_reward_ratio, cash_after, status,
-                      source_scan_id, created_at, expires_at
-                    )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
-                    """,
-                    (
-                        rec_id,
-                        ticker,
-                        strategy,
-                        float(score) if isinstance(score, (int, float)) else None,
-                        json.dumps(reasons),
-                        entry,
-                        stop,
-                        take_profit,
-                        shares_suggested,
-                        notional,
-                        max_loss,
-                        rr,
-                        cash_after,
-                        source_scan_id,
-                        created_at,
-                        expires_at,
-                    ),
-                )
             await db.commit()
 
+            db.row_factory = aiosqlite.Row
             cur = await db.execute("SELECT * FROM recommendations WHERE rec_id = ?", (rec_id,))
             row = await cur.fetchone()
             return _row_to_rec(dict(row)) if row else None
@@ -224,18 +174,40 @@ class RecommendationService:
             return int(cur.rowcount or 0)
 
     async def list(self, *, status: str = "active", limit: int = 50) -> list[dict[str, Any]]:
+        await self.expire_due()
         st = str(status or "active").lower()
         lim = int(max(1, min(500, limit)))
         now = _utcnow_iso()
+
+        if st == "active":
+            # Return only the latest active rec per ticker (keeps UI useful) while retaining full history.
+            async with aiosqlite.connect(self._settings.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                cur = await db.execute(
+                    """
+                    SELECT r.*
+                    FROM recommendations r
+                    JOIN (
+                      SELECT ticker, MAX(created_at) AS max_created_at
+                      FROM recommendations
+                      WHERE status = 'active' AND expires_at > ?
+                      GROUP BY ticker
+                    ) x
+                    ON r.ticker = x.ticker AND r.created_at = x.max_created_at
+                    WHERE r.status = 'active' AND r.expires_at > ?
+                    ORDER BY r.created_at DESC
+                    LIMIT ?
+                    """,
+                    (now, now, lim),
+                )
+                rows = await cur.fetchall()
+                return [_row_to_rec(dict(r)) for r in rows]
 
         where = "WHERE 1=1"
         params: list[Any] = []
         if st != "all":
             where += " AND status = ?"
             params.append(st)
-        if st == "active":
-            where += " AND expires_at > ?"
-            params.append(now)
         params.append(lim)
 
         async with aiosqlite.connect(self._settings.db_path) as db:
@@ -243,6 +215,24 @@ class RecommendationService:
             cur = await db.execute(
                 f"SELECT * FROM recommendations {where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
                 tuple(params),
+            )
+            rows = await cur.fetchall()
+            return [_row_to_rec(dict(r)) for r in rows]
+
+    async def list_history(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        await self.expire_due()
+        lim = int(max(1, min(1000, limit)))
+        async with aiosqlite.connect(self._settings.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT *
+                FROM recommendations
+                WHERE status IN ('expired', 'skipped', 'executed')
+                ORDER BY COALESCE(resolved_at, created_at) DESC
+                LIMIT ?
+                """,
+                (lim,),
             )
             rows = await cur.fetchall()
             return [_row_to_rec(dict(r)) for r in rows]
