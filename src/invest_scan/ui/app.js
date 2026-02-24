@@ -746,9 +746,11 @@ async function refreshVisible({ force = false } = {}) {
       const uni = res.universe_size ?? "—";
       const ranked = (res.ranked || []).length;
       const cand = (res.candidates || []).length;
+      const failed = res.failed_size ?? "—";
+      const errors = (res.errors_sample || []).slice(0, 5).map((x) => `- ${x.ticker}: ${x.error}`).join("\n");
       const err = latest.error || "—";
       msi.style.display = "";
-      msi.innerHTML = `<pre>Last market scan: completed\nUniverse: ${uni}\nScored: ${scored}\nRanked: ${ranked}\nCandidates: ${cand}\nError: ${err}</pre>`;
+      msi.innerHTML = `<pre>Last market scan: completed\nUniverse: ${uni}\nScored: ${scored}\nFailed: ${failed}\nRanked: ${ranked}\nCandidates: ${cand}\nError: ${err}${errors ? "\n\nSample fetch errors:\n" + errors : ""}</pre>`;
     }
   }
   const tab = localStorage.getItem("activeTab") || "signals";

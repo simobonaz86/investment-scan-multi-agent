@@ -169,17 +169,11 @@ class MarketScanService:
 
         cash_usd = (await self._portfolio.get_portfolio()).cash_usd
 
-        async def one(t: str) -> dict[str, Any] | None:
+        async def one(t: str) -> dict[str, Any]:
             try:
-                market = await self._limited(self._market.analyze(t))
-                if market.get("error"):
-                    return None
-                closes = []  # SignalsAgent only needs closes; market already computed from OHLCV
-                # We don't have closes series here (analyze() returns summary), so keep simple:
-                # reconstruct minimal closes-based signals from available fields is not possible.
-                # Instead, re-fetch series once for a smaller subset in future iterations.
-                # For MVP, use trend/rsi computed from closes by calling fetch_and_analyze.
                 market2, series = await self._limited(self._market.fetch_and_analyze(t))
+                if market2.get("error"):
+                    return {"ticker": t, "error": str(market2.get("error"))}
                 closes = series.get("closes") or []
                 signals = self._signals.analyze(closes, market=market2)
                 scored = _score_and_reasons(market=market2, signals=signals)
@@ -203,13 +197,21 @@ class MarketScanService:
                     "signals": signals,
                     "trade_plan": trade_plan,
                 }
-            except httpx.HTTPError:
-                return None
-            except Exception:
-                return None
+            except httpx.HTTPStatusError as e:
+                host = e.request.url.host if e.request else "unknown_host"
+                code = e.response.status_code if e.response else "unknown_status"
+                return {"ticker": t, "error": f"http_status:{code} host:{host}"}
+            except httpx.TimeoutException:
+                return {"ticker": t, "error": "http_timeout"}
+            except httpx.HTTPError as e:
+                return {"ticker": t, "error": f"http_error:{e.__class__.__name__}"}
+            except Exception as e:
+                return {"ticker": t, "error": f"unexpected_error:{e.__class__.__name__}"}
 
         items = await asyncio.gather(*(one(t) for t in tickers))
-        items2 = [x for x in items if x is not None]
+        successes = [x for x in items if not x.get("error")]
+        failures = [x for x in items if x.get("error")]
+        items2 = successes
         items2.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
 
         top_n = int(max(1, self._settings.marketscan_top_n))
@@ -234,6 +236,8 @@ class MarketScanService:
             "universe_source": uni.get("source"),
             "universe_size": len(tickers),
             "scored_size": len(items2),
+            "failed_size": len(failures),
+            "errors_sample": failures[:8],
             "top_n": top_n,
             "min_score": min_score,
             "ranked": ranked,

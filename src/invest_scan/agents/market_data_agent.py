@@ -152,11 +152,16 @@ class MarketDataAgent:
         resp = await self._http.get(url, params=params)
         resp.raise_for_status()
 
+        ct = (resp.headers.get("content-type") or "").lower()
         text = resp.text.strip()
+        if "text/html" in ct or text.lstrip().startswith("<"):
+            raise ValueError("stooq_unexpected_html_response")
         if not text or text.lower().startswith("error"):
             return []
 
         reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames or "Date" not in reader.fieldnames or "Close" not in reader.fieldnames:
+            raise ValueError("stooq_unexpected_csv_shape")
         points: list[MarketHistoryPoint] = []
         for row in reader:
             d = row.get("Date")
