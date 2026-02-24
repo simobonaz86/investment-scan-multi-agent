@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Investment Scan Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=2026-02-24-1" />
   </head>
   <body>
     <header class="topbar">
@@ -18,11 +18,12 @@
         <button class="tab" data-tab="positions" role="tab" aria-selected="false">Positions</button>
         <button class="tab" data-tab="journal" role="tab" aria-selected="false">Journal</button>
         <button class="tab" data-tab="sync" role="tab" aria-selected="false">Sync</button>
-        <a class="tab tab-link" href="/docs" target="_blank" rel="noreferrer">API</a>
+        <a class="tab tab-link" href="/docs" rel="noreferrer">API</a>
       </nav>
     </header>
 
     <main class="container">
+      <div id="fatalError" class="box" style="display:none"></div>
       <section id="summaryBar" class="summary">
         <div class="summary-row">
           <div class="summary-item">
@@ -157,6 +158,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2026-02-24-1"></script>
   </body>
 </html>

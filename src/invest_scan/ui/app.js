@@ -15,9 +15,27 @@ const state = {
   summaryAt: 0,
 };
 
+function showFatal(msg) {
+  const box = el("fatalError");
+  if (!box) return;
+  box.style.display = "";
+  box.innerHTML = `<pre>${escapeHtml(msg)}</pre>`;
+}
+
 async function apiJson(path, opts = {}) {
   const headers = opts.body instanceof FormData ? {} : { "content-type": "application/json" };
-  const r = await fetch(path, { headers: { ...headers, ...(opts.headers || {}) }, ...opts });
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const t = controller ? setTimeout(() => controller.abort(), 15000) : null;
+  let r;
+  try {
+    r = await fetch(path, {
+      headers: { ...headers, ...(opts.headers || {}) },
+      ...opts,
+      signal: controller ? controller.signal : undefined,
+    });
+  } finally {
+    if (t) clearTimeout(t);
+  }
   const isJson = (r.headers.get("content-type") || "").includes("application/json");
   const body = isJson ? await r.json() : await r.text();
   if (!r.ok) {
@@ -728,7 +746,21 @@ function setTab(tab) {
 }
 
 async function refreshVisible({ force = false } = {}) {
-  const dash = await getDashboardCached({ force });
+  let dash;
+  try {
+    dash = await getDashboardCached({ force });
+  } catch (e) {
+    const msg = `Dashboard load failed: ${e && e.message ? e.message : String(e)}\n\nTry:\n- refresh the page\n- open /health\n- open /docs`;
+    showFatal(msg);
+    const out = el("signalCards");
+    if (out) out.innerHTML = "";
+    const empty = el("signalsEmpty");
+    if (empty) {
+      empty.style.display = "";
+      empty.textContent = "Failed to load data. See error banner above.";
+    }
+    return;
+  }
   renderSummary(dash.journal_summary);
   renderMarketScanStatus(dash.marketscan_status);
   const msi = el("marketScanInfo");
@@ -764,6 +796,14 @@ async function refreshVisible({ force = false } = {}) {
 }
 
 async function main() {
+  window.addEventListener("error", (evt) => {
+    showFatal(`JavaScript error: ${evt.message || "unknown"}\n${evt.filename || ""}:${evt.lineno || ""}`);
+  });
+  window.addEventListener("unhandledrejection", (evt) => {
+    const r = evt.reason;
+    showFatal(`Unhandled promise rejection: ${r && r.message ? r.message : String(r)}`);
+  });
+
   document.querySelectorAll("[data-tab]").forEach((b) => {
     b.addEventListener("click", () => {
       setTab(b.dataset.tab);
@@ -927,5 +967,5 @@ async function main() {
   }, 60000);
 }
 
-main().catch((e) => alert(e.message));
+main().catch((e) => showFatal(e && e.message ? e.message : String(e)));
 
