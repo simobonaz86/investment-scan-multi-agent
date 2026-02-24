@@ -242,7 +242,7 @@ function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
             <div class="kv"><div class="k">Cash after</div><div class="v">${fmtMoney(r.cash_after)}</div></div>
             <div class="kv"><div class="k">Entry</div><div class="v">${fmtMoney(r.entry_price)}</div></div>
             <div class="kv"><div class="k">Stop</div><div class="v">${fmtMoney(r.stop_loss)}</div></div>
-            <div class="kv"><div class="k">Shares</div><div class="v">${r.shares ?? "—"}</div></div>
+            <div class="kv"><div class="k">Shares</div><div class="v">${r.shares == null ? "—" : r.shares}</div></div>
             <div class="kv"><div class="k">Max loss</div><div class="v">${fmtMoney(r.max_loss_usd)}</div></div>
             <div class="kv"><div class="k">Take profit</div><div class="v">${fmtMoney(r.take_profit)}</div></div>
             <div class="kv"><div class="k">Notional</div><div class="v">${fmtMoney(r.notional_usd)}</div></div>
@@ -681,7 +681,7 @@ async function loadPortfolio({ dashboard = null } = {}) {
   }
   const positions = p.positions || [];
   const posRows = positions
-    .map((x) => `<tr><td>${x.ticker}</td><td>${x.quantity}</td><td>${x.avg_price ?? ""}</td><td>${fmtTs(x.updated_at)}</td></tr>`)
+    .map((x) => `<tr><td>${x.ticker}</td><td>${x.quantity}</td><td>${x.avg_price == null ? "" : x.avg_price}</td><td>${fmtTs(x.updated_at)}</td></tr>`)
     .join("");
   box.innerHTML = `
     <div class="pill ok">Cash: ${fmtMoney(p.cash_usd)}</div>
@@ -742,11 +742,11 @@ async function refreshVisible({ force = false } = {}) {
       msi.innerHTML = `<pre>Last market scan status: ${latest.status}\nCreated: ${latest.created_at}\nError: ${latest.error || "—"}</pre>`;
     } else {
       const res = latest.result || {};
-      const scored = res.scored_size ?? "—";
-      const uni = res.universe_size ?? "—";
+      const scored = res.scored_size == null ? "—" : res.scored_size;
+      const uni = res.universe_size == null ? "—" : res.universe_size;
       const ranked = (res.ranked || []).length;
       const cand = (res.candidates || []).length;
-      const failed = res.failed_size ?? "—";
+      const failed = res.failed_size == null ? "—" : res.failed_size;
       const errors = (res.errors_sample || []).slice(0, 5).map((x) => `- ${x.ticker}: ${x.error}`).join("\n");
       const err = latest.error || "—";
       msi.style.display = "";
@@ -838,10 +838,10 @@ async function main() {
       ${hint}
       <div style="height:10px"></div>
       <label class="label">Entry price</label>
-      <input id="mEntry" class="input" type="number" step="0.01" inputmode="decimal" value="${rec.entry_price ?? ""}" />
+      <input id="mEntry" class="input" type="number" step="0.01" inputmode="decimal" value="${rec.entry_price == null ? "" : rec.entry_price}" />
       <div style="height:10px"></div>
       <label class="label">Shares</label>
-      <input id="mShares" class="input" type="number" step="1" inputmode="numeric" value="${rec.shares ?? ""}" />
+      <input id="mShares" class="input" type="number" step="1" inputmode="numeric" value="${rec.shares == null ? "" : rec.shares}" />
     `;
     const res = await confirmDialog({ title: `Execute ${rec.ticker}`, bodyHtml, okText: "Execute" });
     if (res !== "ok") return;
