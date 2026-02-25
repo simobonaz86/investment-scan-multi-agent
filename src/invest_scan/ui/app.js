@@ -2,6 +2,18 @@ function el(id) {
   return document.getElementById(id);
 }
 
+// Polyfills for older mobile browsers
+if (typeof Element !== "undefined" && !Element.prototype.closest) {
+  Element.prototype.closest = function (s) {
+    let el = this;
+    while (el && el.nodeType === 1) {
+      if (el.matches && el.matches(s)) return el;
+      el = el.parentElement || el.parentNode;
+    }
+    return null;
+  };
+}
+
 const state = {
   dashboard: null,
   dashboardAt: 0,
@@ -41,8 +53,11 @@ async function apiJson(path, opts = {}) {
       }
       reject(new Error(`request_timeout_after_${timeoutMs}ms`));
     }, timeoutMs);
-    // Avoid leaking the timer if fetch wins.
-    fetchPromise.finally(() => clearTimeout(id));
+    // Avoid leaking the timer if fetch wins (no Promise.finally for older Safari).
+    fetchPromise.then(
+      () => clearTimeout(id),
+      () => clearTimeout(id),
+    );
   });
 
   const r = await Promise.race([fetchPromise, timeoutPromise]);
