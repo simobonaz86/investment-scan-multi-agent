@@ -235,86 +235,127 @@ function mechanismChips(mechanisms) {
   return ms.map((m) => `<span class="pill">${escapeHtml(m)}</span>`).join(" ");
 }
 
-function renderSignalCards(recs, { cashUsd = null, mode = "active" } = {}) {
+function ratingBadge(rating) {
+  const r = String(rating || "").toLowerCase();
+  if (!r) return "";
+  if (r.includes("very")) return `<span class="pill ok">Very strong</span>`;
+  if (r.includes("strong")) return `<span class="pill warn">Strong</span>`;
+  if (r.includes("light") || r.includes("medium")) return `<span class="pill warn">Medium</span>`;
+  return `<span class="pill bad">Low</span>`;
+}
+
+function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = {}) {
   const skipped = mode === "active" ? getSkippedSignalIds() : new Set();
-  return recs
+  const xs = (Array.isArray(recs) ? recs.slice() : [])
     .filter((r) => !skipped.has(String(r.rec_id)))
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+
+  const cols = mode === "active" ? 9 : 7;
+  const rows = xs
     .map((r) => {
-      const tag = (r.strategy || "manual").toLowerCase();
-      const expiresIn = fmtCountdown(msUntil(r.expires_at));
-      const reasons = (r.reasons || []).slice(0, 4);
+      const id = String(r.rec_id);
+      const score = Number(r.score || 0);
+      const entry = Number(r.entry_price || 0);
+      const stop = Number(r.stop_loss || 0);
+      const take = Number(r.take_profit || 0);
+      const shares = r.shares == null ? "—" : String(r.shares);
       const cashAfter = Number(r.cash_after);
       const overBudget = r.cash_valid === false || (Number.isFinite(cashAfter) && cashAfter < 0);
-      const budgetPill = overBudget
-        ? `<span class="pill bad">Over budget</span>`
-        : `<span class="pill ok">Cash OK</span>`;
+      const budget = overBudget ? `<span class="pill bad">Over</span>` : `<span class="pill ok">OK</span>`;
+      const reasons = (r.reasons || []).slice(0, 6);
       const plain = plainEnglishReason(r, Number.isFinite(cashUsd) ? cashUsd : null);
-      const status = (r.status || (mode === "history" ? "history" : "active")).toLowerCase();
+      const chips = mechanismChips(r.mechanisms);
+      const status = String(r.status || (mode === "history" ? "history" : "active")).toLowerCase();
+
+      const actions =
+        mode === "active"
+          ? `<button class="btn btn-mini" data-exec="${escapeHtml(id)}" type="button">Execute</button>
+             <button class="btn btn-secondary btn-mini" data-skip="${escapeHtml(id)}" type="button">Ignore</button>`
+          : `<button class="btn btn-secondary btn-mini" data-copy="${escapeHtml(id)}" type="button">Copy</button>
+             <button class="btn btn-secondary btn-mini" data-hide="${escapeHtml(id)}" type="button">Hide</button>`;
+
       const statusPill =
         status === "executed"
           ? `<span class="pill ok">Executed</span>`
           : status === "skipped"
-            ? `<span class="pill warn">Skipped</span>`
+            ? `<span class="pill warn">Ignored</span>`
             : status === "expired"
               ? `<span class="pill bad">Expired</span>`
               : `<span class="pill ok">Active</span>`;
-      const timingLine =
-        mode === "history"
-          ? `Created ${fmtTs(r.created_at)}`
-          : `Expires in <span data-exp="${r.rec_id}">${expiresIn}</span>`;
-      const rating = ratingPill(r.rating);
-      const chips = mechanismChips(r.mechanisms);
+
       return `
-        <div class="action-card ${overBudget ? "over-budget" : ""}" data-rec="${r.rec_id}" data-expires="${r.expires_at}">
-          <div class="action-top">
-            <div>
-              <div class="ticker">${escapeHtml(r.ticker)}</div>
-              <div class="subtle">
-                ${timingLine}
-                &nbsp;·&nbsp; <span class="pill ok">BUY</span>
-                ${rating ? "&nbsp;·&nbsp;" + rating : ""}
-                &nbsp;·&nbsp; ${budgetPill}
-                &nbsp;·&nbsp; ${statusPill}
-              </div>
-              ${chips ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">${chips}</div>` : ""}
-            </div>
-            <div class="tag ${tag}">${escapeHtml(tag)}</div>
-          </div>
-          <div class="meta">
-            <div class="kv"><div class="k">Score</div><div class="v">${Number(r.score || 0).toFixed(1)}</div></div>
-            <div class="kv"><div class="k">Cash after</div><div class="v">${fmtMoney(r.cash_after)}</div></div>
-            <div class="kv"><div class="k">Entry</div><div class="v">${fmtMoney(r.entry_price)}</div></div>
-            <div class="kv"><div class="k">Stop</div><div class="v">${fmtMoney(r.stop_loss)}</div></div>
-            <div class="kv"><div class="k">Shares</div><div class="v">${r.shares == null ? "—" : r.shares}</div></div>
-            <div class="kv"><div class="k">Max loss</div><div class="v">${fmtMoney(r.max_loss_usd)}</div></div>
-            <div class="kv"><div class="k">Take profit</div><div class="v">${fmtMoney(r.take_profit)}</div></div>
-            <div class="kv"><div class="k">Notional</div><div class="v">${fmtMoney(r.notional_usd)}</div></div>
-            <div class="kv"><div class="k">R/R</div><div class="v">${Number(r.risk_reward_ratio || 0).toFixed(2)}</div></div>
-            <div class="kv"><div class="k">Stop distance</div><div class="v">${fmtMoney(Number(r.entry_price || 0) - Number(r.stop_loss || 0))}</div></div>
-          </div>
-          <div class="reasons">
-            <div class="k">Key reasons</div>
-            <ul>${reasons.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
-          </div>
-          <details class="details">
-            <summary>Deep dive (plain English)</summary>
-            <div class="plain">${escapeHtml(plain)}</div>
-          </details>
+        <tr class="rec-row ${overBudget ? "over-budget" : ""}" data-rec-row="${escapeHtml(id)}">
+          <td class="ticker-cell">${escapeHtml(r.ticker)}</td>
+          <td class="num">${score.toFixed(1)}</td>
+          <td>${ratingBadge(r.rating)}</td>
+          <td class="num">${fmtMoney(entry)}</td>
+          <td class="num">${fmtMoney(take)}</td>
+          <td class="num">${fmtMoney(stop)}</td>
+          <td class="num">${escapeHtml(shares)}</td>
           ${
             mode === "active"
-              ? `<div class="actions">
-                   <button class="btn" data-exec="${r.rec_id}">Execute</button>
-                   <button class="btn btn-secondary" data-skip="${r.rec_id}">Skip</button>
-                 </div>`
-              : `<div class="actions">
-                   <button class="btn btn-secondary" data-copy="${r.rec_id}">Copy ticker</button>
-                   <button class="btn btn-secondary" data-hide="${r.rec_id}">Hide</button>
-                 </div>`
+              ? `<td class="num">${budget}&nbsp;<span class="subtle">${fmtMoney(r.cash_after)}</span></td>`
+              : `<td>${statusPill}</td>`
           }
-        </div>
+          <td class="actions-cell">${actions}</td>
+        </tr>
+        <tr class="rec-details-row" data-rec-detail="${escapeHtml(id)}">
+          <td colspan="${cols}">
+            <div class="recs-details">
+              <div>
+                <div class="k">Key reasons</div>
+                ${chips ? `<div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px;">${chips}</div>` : ""}
+                <ul>${reasons.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+                <div style="height:10px"></div>
+                <div class="subtle">Created: ${fmtTs(r.created_at)} · Expires: ${fmtTs(r.expires_at)}</div>
+              </div>
+              <div>
+                <div class="k">Explanation (plain English)</div>
+                <div class="plain">${escapeHtml(plain)}</div>
+              </div>
+            </div>
+          </td>
+        </tr>
       `;
     })
     .join("");
+
+  const headActive = `
+    <tr>
+      <th>Ticker</th>
+      <th class="num">Score</th>
+      <th>Rating</th>
+      <th class="num">Entry</th>
+      <th class="num">Take</th>
+      <th class="num">Stop</th>
+      <th class="num">Shares</th>
+      <th class="num">Cash</th>
+      <th></th>
+    </tr>
+  `;
+  const headHist = `
+    <tr>
+      <th>Ticker</th>
+      <th class="num">Score</th>
+      <th>Rating</th>
+      <th class="num">Entry</th>
+      <th class="num">Take</th>
+      <th class="num">Stop</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  `;
+
+  return `
+    <div class="recs-table">
+      <div class="table-scroll">
+        <table>
+          <thead>${mode === "active" ? headActive : headHist}</thead>
+          <tbody>${rows || `<tr><td colspan="${cols}">No recommendations.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderSummary(s) {
@@ -412,7 +453,7 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
   }
 
   if (mode === "history") {
-    out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "history" });
+    out.innerHTML = renderRecommendationsTable(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "history" });
     state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
     state.signalsAt = now;
     return;
@@ -473,7 +514,7 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
     }
   }
 
-  out.innerHTML = renderSignalCards(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "active" });
+  out.innerHTML = renderRecommendationsTable(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "active" });
   state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
   state.signalsAt = now;
 }
@@ -847,7 +888,16 @@ async function main() {
     const skipBtn = evt.target.closest("[data-skip]");
     const copyBtn = evt.target.closest("[data-copy]");
     const hideBtn = evt.target.closest("[data-hide]");
-    if (!execBtn && !skipBtn && !copyBtn && !hideBtn) return;
+    const row = evt.target.closest("tr[data-rec-row]");
+    if (!execBtn && !skipBtn && !copyBtn && !hideBtn) {
+      if (row) {
+        const id = row.getAttribute("data-rec-row");
+        const detail = document.querySelector(`tr[data-rec-detail="${CSS.escape(id)}"]`);
+        row.classList.toggle("is-open");
+        if (detail) detail.classList.toggle("is-open");
+      }
+      return;
+    }
 
     const srcEl = execBtn || skipBtn || copyBtn || hideBtn;
     const id =

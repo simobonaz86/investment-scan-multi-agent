@@ -194,6 +194,37 @@ h2 { margin: 0 0 10px; font-size: 18px; }
 .details .plain { margin-top: 8px; color: #334155; font-size: 13px; }
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
 
+/* Recommendations table (mobile-friendly: horizontal scroll + expandable rows) */
+.recs-table { margin-top: 10px; }
+.recs-table .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.recs-table table { min-width: 820px; }
+.recs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+}
+.recs-table tr.rec-row { cursor: pointer; }
+.recs-table tr.rec-row:hover td { background: #fbfdff; }
+.recs-table tr.rec-row.is-open td { background: #fbfdff; }
+.recs-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.recs-table .ticker-cell { font-weight: 1000; letter-spacing: 0.2px; }
+.recs-table .actions-cell { white-space: nowrap; }
+.recs-table .btn-mini {
+  padding: 8px 10px;
+  min-height: 36px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+.recs-table .btn-mini + .btn-mini { margin-left: 8px; }
+.recs-table tr.rec-details-row td { padding: 12px; background: #fbfdff; }
+.recs-table tr.rec-details-row { display: none; }
+.recs-table tr.rec-details-row.is-open { display: table-row; }
+.recs-details { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.recs-details .plain { color: #334155; font-size: 13px; line-height: 1.35; }
+.recs-details ul { margin: 8px 0 0; padding-left: 18px; }
+.recs-details .k { margin-bottom: 6px; }
+
 .segmented { display: inline-flex; border: 1px solid #e5e7eb; background: #f8fafc; border-radius: 999px; padding: 2px; gap: 2px; }
 .seg { border: 0; background: transparent; padding: 8px 10px; border-radius: 999px; font-weight: 900; font-size: 13px; cursor: pointer; color: #334155; }
 .seg.is-active { background: #eef2ff; color: #0f172a; }

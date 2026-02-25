@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Investment Scan Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2026-02-24-4" />
+    <link rel="stylesheet" href="/static/styles.css?v=2026-02-25-1" />
   </head>
   <body>
     <header class="topbar">
@@ -13,7 +13,7 @@
         <div id="lastUpdated" class="brand-subtle">Loading…</div>
       </div>
       <nav class="tabs" role="tablist" aria-label="Dashboard sections">
-        <button class="tab is-active" data-tab="signals" role="tab" aria-selected="true">Signals</button>
+        <button class="tab is-active" data-tab="signals" role="tab" aria-selected="true">Recommendations</button>
         <button class="tab" data-tab="scans" role="tab" aria-selected="false">Scans</button>
         <button class="tab" data-tab="positions" role="tab" aria-selected="false">Positions</button>
         <button class="tab" data-tab="journal" role="tab" aria-selected="false">Journal</button>
@@ -63,10 +63,10 @@
           <button id="clearSkippedBtn" class="btn btn-secondary" type="button">Clear skipped</button>
         </div>
         <div class="help">
-          Actionable recommendations (tap Execute/Skip). Built for phone browsers: big buttons, no tiny tables.
+          Ranked recommendations (highest score first). Tap a row to see key reasons + plain-English explanation.
         </div>
         <div id="marketScanInfo" class="box" style="display: none"></div>
-        <div id="signalCards" class="cards">Loading recommendations…</div>
+        <div id="signalCards" class="table">Loading recommendations…</div>
         <div id="signalsEmpty" class="box" style="display: none">No active recommendations.</div>
       </section>
 
@@ -158,6 +158,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=2026-02-24-4"></script>
+    <script src="/static/app.js?v=2026-02-25-1"></script>
   </body>
 </html>
