@@ -267,13 +267,25 @@ function ratingBadge(rating) {
   return `<span class="pill bad">Low</span>`;
 }
 
-function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = {}) {
+function triggerPill(status) {
+  const s = String(status || "WAITING").toUpperCase();
+  if (s === "TRIGGERED") return `<span class="pill ok">Triggered</span>`;
+  if (s === "TOO_LATE") return `<span class="pill warn">Too late</span>`;
+  if (s === "INVALIDATED") return `<span class="pill bad">Invalid</span>`;
+  if (s === "DATA_ERROR") return `<span class="pill bad">No data</span>`;
+  return `<span class="pill">Waiting</span>`;
+}
+
+function renderRecommendationsTable(
+  recs,
+  { cashUsd = null, mode = "active", triggersByTicker = null } = {},
+) {
   const skipped = mode === "active" ? getSkippedSignalIds() : new Set();
   const xs = (Array.isArray(recs) ? recs.slice() : [])
     .filter((r) => !skipped.has(String(r.rec_id)))
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
 
-  const cols = mode === "active" ? 9 : 7;
+  const cols = mode === "active" ? 10 : 8;
   const rows = xs
     .map((r) => {
       const id = String(r.rec_id);
@@ -289,6 +301,15 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
       const plain = plainEnglishReason(r, Number.isFinite(cashUsd) ? cashUsd : null);
       const chips = mechanismChips(r.mechanisms);
       const status = String(r.status || (mode === "history" ? "history" : "active")).toLowerCase();
+      const trig = triggersByTicker && r.ticker ? triggersByTicker[String(r.ticker).toUpperCase()] : null;
+      const trigStatus = trig ? trig.status : null;
+      const trigReason = trig ? trig.reason : null;
+      const trigLast = trig ? trig.last_price : null;
+      const trigPx = trig ? trig.trigger_price : null;
+      const trigExt = trig ? trig.extension_pct : null;
+      const trigSetup = trig ? trig.setup_type : null;
+      const trigInterval = trig ? trig.interval : null;
+      const trigDetails = trig ? trig.details : null;
 
       const actions =
         mode === "active"
@@ -310,6 +331,7 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
         <tr class="rec-row ${overBudget ? "over-budget" : ""}" data-rec-row="${escapeHtml(id)}">
           <td class="ticker-cell col-ticker">${escapeHtml(r.ticker)}</td>
           <td class="num col-score">${score.toFixed(1)}</td>
+          <td class="col-trigger">${triggerPill(trigStatus || "WAITING")}</td>
           <td class="col-rating">${ratingBadge(r.rating)}</td>
           <td class="num col-entry">${fmtMoney(entry)}</td>
           <td class="num col-take">${fmtMoney(take)}</td>
@@ -333,6 +355,23 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
                 <div class="subtle">Created: ${fmtTs(r.created_at)} · Expires: ${fmtTs(r.expires_at)}</div>
               </div>
               <div>
+                <div class="k">Intraday trigger</div>
+                <div class="plain">
+                  Status: <b>${escapeHtml(String(trigStatus || "WAITING"))}</b>${trigSetup ? ` · Setup: <b>${escapeHtml(String(trigSetup))}</b>` : ""}${trigInterval ? ` · Interval: <b>${escapeHtml(String(trigInterval))}</b>` : ""}<br/>
+                  ${trigPx != null ? `Trigger: <b>${fmtMoney(trigPx)}</b>` : ""}${trigLast != null ? ` · Last: <b>${fmtMoney(trigLast)}</b>` : ""}${trigExt != null ? ` · Ext: <b>${(Number(trigExt) * 100).toFixed(2)}%</b>` : ""}<br/>
+                  ${trigReason ? `Reason: ${escapeHtml(String(trigReason))}` : "Reason: —"}
+                </div>
+                ${
+                  trigDetails
+                    ? `<div class="subtle" style="margin-top:8px;">
+                         EMA20: ${trigDetails.ema20 == null ? "—" : fmtMoney(trigDetails.ema20)}
+                         · VWAP: ${trigDetails.vwap == null ? "—" : fmtMoney(trigDetails.vwap)}
+                         · RangeHi(20): ${trigDetails.range_high_20 == null ? "—" : fmtMoney(trigDetails.range_high_20)}
+                         · VolRatio: ${trigDetails.vol_ratio == null ? "—" : Number(trigDetails.vol_ratio).toFixed(2)}
+                       </div>`
+                    : ""
+                }
+                <div style="height:10px"></div>
                 <div class="k">Explanation (plain English)</div>
                 <div class="plain">${escapeHtml(plain)}</div>
               </div>
@@ -347,6 +386,7 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
     <tr>
       <th class="col-ticker">Ticker</th>
       <th class="num col-score">Score</th>
+      <th class="col-trigger">Trigger</th>
       <th class="col-rating">Rating</th>
       <th class="num col-entry">Entry</th>
       <th class="num col-take">Take</th>
@@ -360,6 +400,7 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
     <tr>
       <th class="col-ticker">Ticker</th>
       <th class="num col-score">Score</th>
+      <th class="col-trigger">Trigger</th>
       <th class="col-rating">Rating</th>
       <th class="num col-entry">Entry</th>
       <th class="num col-take">Take</th>
@@ -458,25 +499,45 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
   let recs = [];
   let p = null;
   let msl = null;
+  let triggersByTicker = {};
   if (dashboard) {
     recs = mode === "history" ? (dashboard.recommendations_history || []) : (dashboard.recommendations || []);
     p = dashboard.portfolio || null;
     msl = dashboard.marketscan_latest || null;
+    const iw = dashboard.intraday_watchlist || [];
+    if (Array.isArray(iw)) {
+      for (const it of iw) {
+        if (!it || !it.ticker) continue;
+        triggersByTicker[String(it.ticker).toUpperCase()] = it;
+      }
+    }
   } else {
     const endpoint =
       mode === "history"
         ? "/api/recommendations/history?limit=200"
         : "/api/recommendations?status=active&limit=50";
-    const [data, port] = await Promise.all([
+    const [data, port, iw] = await Promise.all([
       apiJson(endpoint),
       getPortfolioCached(),
+      apiJson("/api/intraday/watchlist?limit=30").catch(() => ({ items: [] })),
     ]);
     recs = data.recommendations || [];
     p = port;
+    const items = iw && iw.items ? iw.items : [];
+    if (Array.isArray(items)) {
+      for (const it of items) {
+        if (!it || !it.ticker) continue;
+        triggersByTicker[String(it.ticker).toUpperCase()] = it;
+      }
+    }
   }
 
   if (mode === "history") {
-    out.innerHTML = renderRecommendationsTable(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "history" });
+    out.innerHTML = renderRecommendationsTable(recs, {
+      cashUsd: Number((p && p.cash_usd) || 0),
+      mode: "history",
+      triggersByTicker,
+    });
     state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
     state.signalsAt = now;
     return;
@@ -544,7 +605,11 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
     }
   }
 
-  out.innerHTML = renderRecommendationsTable(recs, { cashUsd: Number((p && p.cash_usd) || 0), mode: "active" });
+  out.innerHTML = renderRecommendationsTable(recs, {
+    cashUsd: Number((p && p.cash_usd) || 0),
+    mode: "active",
+    triggersByTicker,
+  });
   state.signalsById = new Map(recs.map((r) => [String(r.rec_id), r]));
   state.signalsAt = now;
 }

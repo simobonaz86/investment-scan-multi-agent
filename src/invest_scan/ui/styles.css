@@ -265,8 +265,8 @@ h2 { margin: 0 0 10px; font-size: 18px; }
   .recs-table .col-cash {
     display: none;
   }
-  .recs-table .table th,
-  .recs-table .table td {
+  .recs-table th,
+  .recs-table td {
     padding: 9px 8px;
     font-size: 12px;
   }

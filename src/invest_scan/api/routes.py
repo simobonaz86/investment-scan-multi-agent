@@ -318,6 +318,7 @@ async def api_dashboard(
     scans_limit: int = 25,
     trades_open_limit: int = 200,
     trades_closed_limit: int = 200,
+    intraday_limit: int = 20,
 ) -> dict[str, Any]:
     s = request.app.state.settings
     try:
@@ -373,6 +374,12 @@ async def api_dashboard(
             "error": row.get("error"),
         }
 
+    async def intraday_watchlist():
+        try:
+            return await request.app.state.intraday_service.get_watchlist(limit=intraday_limit)
+        except Exception:
+            return []
+
     (
         p,
         js,
@@ -383,6 +390,7 @@ async def api_dashboard(
         sc,
         msst,
         msl,
+        iw,
     ) = await asyncio.gather(
         portfolio(),
         journal_summary(),
@@ -393,6 +401,7 @@ async def api_dashboard(
         scans(),
         marketscan_status_obj(),
         latest_marketscan(),
+        intraday_watchlist(),
     )
 
     return {
@@ -405,6 +414,17 @@ async def api_dashboard(
         "scans": sc,
         "marketscan_status": msst,
         "marketscan_latest": msl,
+        "intraday_watchlist": iw,
         "server_time_utc": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/api/intraday/watchlist")
+async def api_intraday_watchlist(request: Request, limit: int = 20, refresh: bool = False) -> dict[str, Any]:
+    svc = request.app.state.intraday_service
+    if refresh:
+        items = await svc.refresh_watchlist()
+    else:
+        items = await svc.get_watchlist(limit=limit)
+    return {"items": items}
 

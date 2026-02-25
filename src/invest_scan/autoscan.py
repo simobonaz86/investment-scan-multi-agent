@@ -109,3 +109,25 @@ async def market_scan_loop(app: FastAPI) -> None:
             raise
         except Exception:
             await asyncio.sleep(min(30, interval))
+
+
+async def intraday_loop(app: FastAPI) -> None:
+    settings: Settings = app.state.settings
+    if not getattr(settings, "intraday_enabled", False):
+        return
+
+    mh = _market_hours(settings)
+    interval = max(30, int(getattr(settings, "intraday_poll_seconds", 180)))
+
+    while True:
+        try:
+            if (not getattr(settings, "intraday_only_market_hours", True)) or mh.is_open_now():
+                try:
+                    await app.state.intraday_service.refresh_watchlist()
+                except Exception:
+                    pass
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.sleep(min(30, interval))

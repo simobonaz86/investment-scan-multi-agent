@@ -155,6 +155,29 @@ async def init_db(db_path: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_recommendations_status_expires ON recommendations(status, expires_at)"
         )
 
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS intraday_watchlist (
+                ticker TEXT PRIMARY KEY,
+                rec_id TEXT,
+                score REAL,
+                rating TEXT,
+                setup_type TEXT,
+                status TEXT NOT NULL,
+                trigger_price REAL,
+                triggered_at TEXT,
+                last_price REAL,
+                extension_pct REAL,
+                interval TEXT,
+                reason TEXT,
+                details_json TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_intraday_watchlist_score ON intraday_watchlist(score)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_intraday_watchlist_status ON intraday_watchlist(status)")
+
         # Lightweight migrations for existing deployments
         await _ensure_column(db, table="recommendations", column="rating", column_def="TEXT")
         await _ensure_column(db, table="recommendations", column="mechanisms", column_def="TEXT")

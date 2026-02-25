@@ -33,6 +33,7 @@ async def test_marketscan_includes_error_samples_when_yfinance_returns_empty(tmp
             cache_ttl_seconds=1,
             sp500_ranking_max_tickers=2,
             marketscan_interval_seconds=999999,
+            intraday_enabled=False,
         ),
         transport=httpx.MockTransport(handler),
     )

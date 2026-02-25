@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # Optional market data fallback
     finnhub_api_key: str = ""
 
+    # Intraday stage (watchlist triggers)
+    intraday_enabled: bool = True
+    intraday_only_market_hours: bool = True
+    intraday_interval: str = "15m"  # yfinance interval (e.g., 5m/15m/30m/60m)
+    intraday_period: str = "5d"  # yfinance period (intraday lookback)
+    intraday_watchlist_size: int = 20
+    intraday_poll_seconds: int = 180
+
 
 settings = Settings()
 

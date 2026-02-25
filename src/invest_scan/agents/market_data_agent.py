@@ -472,6 +472,99 @@ class MarketDataAgent:
         t = str(ticker).strip().upper()
         return (m.get(t) or []), src
 
+    async def fetch_intraday_histories(
+        self,
+        tickers: list[str],
+        *,
+        interval: str = "15m",
+        period: str = "5d",
+        chunk_size: int = 20,
+    ) -> dict[str, list[dict[str, Any]]]:
+        # Returns per-ticker list of candles dicts with keys: ts/open/high/low/close/volume.
+        tickers2 = [str(t).strip().upper() for t in tickers if str(t).strip()]
+        tickers2 = list(dict.fromkeys(tickers2))
+        if not tickers2:
+            return {}
+
+        try:
+            import pandas as pd  # type: ignore
+        except Exception:
+            return {}
+
+        def _download(chunk: list[str]):
+            return yf.download(
+                tickers=" ".join(chunk),
+                period=period,
+                interval=interval,
+                group_by="ticker",
+                threads=True,
+                auto_adjust=False,
+                progress=False,
+                prepost=False,
+            )
+
+        out: dict[str, list[dict[str, Any]]] = {}
+        for i in range(0, len(tickers2), int(max(1, chunk_size))):
+            chunk = tickers2[i : i + int(max(1, chunk_size))]
+            try:
+                df = await asyncio.to_thread(_download, chunk)
+            except Exception as e:
+                self._log.warning("yfinance intraday chunk failed (%d-%d): %s", i, i + len(chunk), e)
+                continue
+            if df is None or not hasattr(df, "index") or len(df.index) == 0:
+                continue
+
+            # Single ticker: normal DataFrame.
+            if not isinstance(getattr(df, "columns", None), pd.MultiIndex):
+                t = chunk[0]
+                rows: list[dict[str, Any]] = []
+                for ts, row in df.iterrows():
+                    try:
+                        rows.append(
+                            {
+                                "ts": ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                                "open": float(row.get("Open")),
+                                "high": float(row.get("High")),
+                                "low": float(row.get("Low")),
+                                "close": float(row.get("Close")),
+                                "volume": float(row.get("Volume") or 0.0),
+                            }
+                        )
+                    except Exception:
+                        continue
+                if rows:
+                    out[t] = rows
+                continue
+
+            cols = df.columns
+            lvl0 = set(cols.get_level_values(0))
+            for t in chunk:
+                if t not in lvl0:
+                    continue
+                try:
+                    sub = df[t]
+                except Exception:
+                    continue
+                rows: list[dict[str, Any]] = []
+                for ts, row in sub.iterrows():
+                    try:
+                        rows.append(
+                            {
+                                "ts": ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                                "open": float(row.get("Open")),
+                                "high": float(row.get("High")),
+                                "low": float(row.get("Low")),
+                                "close": float(row.get("Close")),
+                                "volume": float(row.get("Volume") or 0.0),
+                            }
+                        )
+                    except Exception:
+                        continue
+                if rows:
+                    out[t] = rows
+
+        return out
+
     async def analyze(self, ticker: str) -> dict[str, Any]:
         history, source = await self.fetch_history(ticker)
         closes = [p.close for p in history]

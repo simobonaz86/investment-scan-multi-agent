@@ -76,6 +76,7 @@ def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         db_path=str(tmp_path / "test.db"),
         cache_ttl_seconds=1,
         marketscan_interval_seconds=999999,
+        intraday_enabled=False,
     )
     return create_app(settings_obj=settings, transport=transport)
 

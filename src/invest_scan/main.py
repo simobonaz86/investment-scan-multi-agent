@@ -11,11 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from invest_scan import db
-from invest_scan.autoscan import autoscan_loop, market_scan_loop
+from invest_scan.autoscan import autoscan_loop, intraday_loop, market_scan_loop
 from invest_scan.api import router
 from invest_scan.settings import Settings, settings
 from invest_scan.services.market_scan_service import MarketScanService
 from invest_scan.services.journal_service import JournalService
+from invest_scan.services.intraday_service import IntradayService
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
@@ -64,6 +65,11 @@ def create_app(
         app.state.recommendation_service = RecommendationService(
             settings=settings_obj, trade_service=app.state.trade_service
         )
+        app.state.intraday_service = IntradayService(
+            settings=settings_obj,
+            http=http,
+            recommendations=app.state.recommendation_service,
+        )
         app.state.universe_service = UniverseService(settings=settings_obj, http=http)
         app.state.ranking_service = RankingService(
             settings=settings_obj, http=http, universe=app.state.universe_service
@@ -83,12 +89,16 @@ def create_app(
         )
         autoscan_task: asyncio.Task | None = None
         market_task: asyncio.Task | None = None
+        intraday_task: asyncio.Task | None = None
         if settings_obj.autoscan_enabled:
             autoscan_task = asyncio.create_task(autoscan_loop(app))
             app.state.autoscan_task = autoscan_task
         if settings_obj.marketscan_enabled:
             market_task = asyncio.create_task(market_scan_loop(app))
             app.state.market_scan_task = market_task
+        if getattr(settings_obj, "intraday_enabled", False):
+            intraday_task = asyncio.create_task(intraday_loop(app))
+            app.state.intraday_task = intraday_task
         try:
             yield
         finally:
@@ -102,6 +112,12 @@ def create_app(
                 market_task.cancel()
                 try:
                     await market_task
+                except asyncio.CancelledError:
+                    pass
+            if intraday_task is not None:
+                intraday_task.cancel()
+                try:
+                    await intraday_task
                 except asyncio.CancelledError:
                     pass
             await http.aclose()
