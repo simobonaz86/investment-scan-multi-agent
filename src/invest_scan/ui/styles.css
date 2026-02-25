@@ -257,3 +257,21 @@ h2 { margin: 0 0 10px; font-size: 18px; }
   .tabs { max-width: 62vw; }
 }
 
+@media (max-width: 520px) {
+  .recs-table table { min-width: 0; }
+  .recs-details { grid-template-columns: 1fr; }
+  .recs-table .col-take,
+  .recs-table .col-stop,
+  .recs-table .col-cash {
+    display: none;
+  }
+  .recs-table .table th,
+  .recs-table .table td {
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+  .recs-table .actions-cell { display: flex; gap: 8px; }
+  .recs-table .btn-mini { width: auto; padding: 8px 10px; }
+  .recs-table .btn-mini + .btn-mini { margin-left: 0; }
+}
+

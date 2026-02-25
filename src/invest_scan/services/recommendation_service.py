@@ -26,6 +26,56 @@ def _parse_dt(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s)
 
 
+def _take_profit(
+    *,
+    entry: float,
+    stop: float,
+    atr: float | None,
+    strategy: str,
+    rating: str | None,
+    signals: dict[str, Any],
+) -> float:
+    """
+    Compute a take-profit that is achievable for a short-horizon scan.
+
+    Previously we used a fixed 2R target (entry + 2*stop_dist). That can become unrealistic for
+    high-volatility names (large ATR => large stop_dist => huge take).
+    """
+    stop_dist = float(entry - stop)
+    if entry <= 0 or stop <= 0 or stop_dist <= 0:
+        return float(entry)
+
+    r = (rating or "").strip().lower()
+    if "very" in r:
+        rr_target = 1.7
+    elif "strong" in r:
+        rr_target = 1.5
+    elif "light" in r or "medium" in r:
+        rr_target = 1.3
+    else:
+        rr_target = 1.2
+
+    # Caps: keep targets realistic.
+    max_pct = 0.15  # 15% cap by default
+    max_dist_pct = float(entry) * max_pct
+    max_dist_atr = float(atr) * 3.0 if isinstance(atr, (int, float)) and float(atr) > 0 else None
+
+    dist = float(stop_dist) * float(rr_target)
+    dist = min(dist, max_dist_pct)
+    if max_dist_atr is not None:
+        dist = min(dist, float(max_dist_atr))
+    dist = max(0.0, dist)
+    fallback_take = float(entry + dist)
+
+    # Mean reversion: target the mean (SMA20) if it is closer than the capped RR target.
+    if str(strategy or "").lower() == "reversion":
+        sma20 = signals.get("sma20")
+        if isinstance(sma20, (int, float)) and float(sma20) > entry:
+            return float(min(float(sma20), fallback_take))
+
+    return float(fallback_take)
+
+
 def _row_to_rec(row: dict[str, Any]) -> dict[str, Any]:
     cash_after = float(row["cash_after"]) if row.get("cash_after") is not None else None
     return {
@@ -99,7 +149,14 @@ class RecommendationService:
         else:
             strategy = "manual"
 
-        take_profit = entry + (2.0 * stop_dist)
+        take_profit = _take_profit(
+            entry=entry,
+            stop=stop,
+            atr=atr,
+            strategy=strategy,
+            rating=str(candidate.get("rating") or "") or None,
+            signals=signals,
+        )
 
         planning_cash = float(max(0.0, cash_usd))
         if planning_cash <= 0:

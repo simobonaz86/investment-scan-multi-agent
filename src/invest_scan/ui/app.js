@@ -220,6 +220,29 @@ function addSkippedSignalId(id) {
   localStorage.setItem("skippedSignals", JSON.stringify(Array.from(s).slice(-500)));
 }
 
+function computeTakeProfit({ entry, stop, atr, sma20, rating }) {
+  const e = Number(entry || 0);
+  const s = Number(stop || 0);
+  const a = Number(atr || 0);
+  const sd = e > 0 && s > 0 ? (e - s) : 0;
+  if (e <= 0 || sd <= 0) return 0;
+
+  const r = String(rating || "").toLowerCase();
+  let rr = 1.2;
+  if (r.includes("very")) rr = 1.7;
+  else if (r.includes("strong")) rr = 1.5;
+  else if (r.includes("light") || r.includes("medium")) rr = 1.3;
+
+  const capPct = 0.15;
+  let dist = rr * sd;
+  dist = Math.min(dist, e * capPct);
+  if (Number.isFinite(a) && a > 0) dist = Math.min(dist, 3.0 * a);
+  dist = Math.max(0, dist);
+  let tp = e + dist;
+  if (Number.isFinite(sma20) && sma20 > e) tp = Math.min(tp, sma20);
+  return tp;
+}
+
 function ratingPill(rating) {
   const r = String(rating || "").toLowerCase();
   if (!r) return "";
@@ -285,19 +308,19 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
 
       return `
         <tr class="rec-row ${overBudget ? "over-budget" : ""}" data-rec-row="${escapeHtml(id)}">
-          <td class="ticker-cell">${escapeHtml(r.ticker)}</td>
-          <td class="num">${score.toFixed(1)}</td>
-          <td>${ratingBadge(r.rating)}</td>
-          <td class="num">${fmtMoney(entry)}</td>
-          <td class="num">${fmtMoney(take)}</td>
-          <td class="num">${fmtMoney(stop)}</td>
-          <td class="num">${escapeHtml(shares)}</td>
+          <td class="ticker-cell col-ticker">${escapeHtml(r.ticker)}</td>
+          <td class="num col-score">${score.toFixed(1)}</td>
+          <td class="col-rating">${ratingBadge(r.rating)}</td>
+          <td class="num col-entry">${fmtMoney(entry)}</td>
+          <td class="num col-take">${fmtMoney(take)}</td>
+          <td class="num col-stop">${fmtMoney(stop)}</td>
+          <td class="num col-shares">${escapeHtml(shares)}</td>
           ${
             mode === "active"
-              ? `<td class="num">${budget}&nbsp;<span class="subtle">${fmtMoney(r.cash_after)}</span></td>`
-              : `<td>${statusPill}</td>`
+              ? `<td class="num col-cash">${budget}&nbsp;<span class="subtle">${fmtMoney(r.cash_after)}</span></td>`
+              : `<td class="col-status">${statusPill}</td>`
           }
-          <td class="actions-cell">${actions}</td>
+          <td class="actions-cell col-actions">${actions}</td>
         </tr>
         <tr class="rec-details-row" data-rec-detail="${escapeHtml(id)}">
           <td colspan="${cols}">
@@ -322,26 +345,26 @@ function renderRecommendationsTable(recs, { cashUsd = null, mode = "active" } = 
 
   const headActive = `
     <tr>
-      <th>Ticker</th>
-      <th class="num">Score</th>
-      <th>Rating</th>
-      <th class="num">Entry</th>
-      <th class="num">Take</th>
-      <th class="num">Stop</th>
-      <th class="num">Shares</th>
-      <th class="num">Cash</th>
+      <th class="col-ticker">Ticker</th>
+      <th class="num col-score">Score</th>
+      <th class="col-rating">Rating</th>
+      <th class="num col-entry">Entry</th>
+      <th class="num col-take">Take</th>
+      <th class="num col-stop">Stop</th>
+      <th class="num col-shares">Shares</th>
+      <th class="num col-cash">Cash</th>
       <th></th>
     </tr>
   `;
   const headHist = `
     <tr>
-      <th>Ticker</th>
-      <th class="num">Score</th>
-      <th>Rating</th>
-      <th class="num">Entry</th>
-      <th class="num">Take</th>
-      <th class="num">Stop</th>
-      <th>Status</th>
+      <th class="col-ticker">Ticker</th>
+      <th class="num col-score">Score</th>
+      <th class="col-rating">Rating</th>
+      <th class="num col-entry">Entry</th>
+      <th class="num col-take">Take</th>
+      <th class="num col-stop">Stop</th>
+      <th class="col-status">Status</th>
       <th></th>
     </tr>
   `;
@@ -470,13 +493,20 @@ async function loadSignals({ dashboard = null, force = false } = {}) {
         recs = ranked.map((c) => {
           const tp = c.trade_plan || {};
           const m = c.market || {};
+          const sig = c.signals || {};
           const entry = Number(tp.entry_price || m.last_close || 0);
           const stop = Number(tp.stop_loss || 0);
           const shares = Number(tp.shares || 0);
           const notional = entry * shares;
           const cashAfter = Number(p.cash_usd || 0) - notional;
           const stopDist = entry > 0 && stop > 0 ? entry - stop : 0;
-          const take = entry + (2 * stopDist);
+          const take = computeTakeProfit({
+            entry,
+            stop,
+            atr: Number(m.atr14 || 0),
+            sma20: Number(sig.sma20 || 0),
+            rating: String(c.rating || ""),
+          });
           const rr = stopDist > 0 ? (take - entry) / stopDist : 0;
           return {
             rec_id: `cand:${c.ticker}`,
