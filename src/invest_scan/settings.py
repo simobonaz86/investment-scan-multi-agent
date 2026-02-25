@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     universe_datahub_csv_url: str = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
     universe_refresh_seconds: int = 86400
     universe_max_tickers: int = 500
+    universe_yahoo_screener_id: str = "most_actives"
+    universe_yahoo_screener_count: int = 250
 
     # Ranking: rolling 1-week return (5 trading days), can run any day.
     sp500_weekly_ranking_enabled: bool = True
