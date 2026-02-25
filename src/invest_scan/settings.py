@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Recommendations
     rec_expiry_hours: int = 4
 
+    # Optional market data fallback
+    finnhub_api_key: str = ""
+
 
 settings = Settings()
 

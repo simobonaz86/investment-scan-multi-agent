@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import asyncio
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-import httpx
-
 from invest_scan import db
+
 from invest_scan.agents import MarketDataAgent, RiskAgent, SignalsAgent
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.recommendation_service import RecommendationService
@@ -153,32 +153,53 @@ class MarketScanService:
         self._portfolio = portfolio
         self._recs = recommendations
 
-        self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
-        self._market = MarketDataAgent(http)
+        self._log = logging.getLogger(__name__)
+        self._market = MarketDataAgent(http, finnhub_api_key=settings.finnhub_api_key)
         self._signals = SignalsAgent()
         self._risk = RiskAgent()
 
-    async def _limited(self, coro):
-        async with self._sem:
-            return await coro
-
     async def run(self, *, scan_id: UUID) -> dict[str, Any]:
+        t0 = time.perf_counter()
         uni = await self._universe.get_universe()
         tickers = list(uni.get("tickers") or [])
         tickers = tickers[: int(self._settings.sp500_ranking_max_tickers)]
 
         cash_usd = (await self._portfolio.get_portfolio()).cash_usd
+        self._log.info("Market scan start: %d tickers", len(tickers))
 
-        async def one(t: str) -> dict[str, Any]:
+        # One batch market-data call for the entire universe.
+        fetch_t0 = time.perf_counter()
+        histories, source = await self._market.fetch_histories(
+            tickers, period="90d", attempts=2, backoff_seconds=1.0
+        )
+        self._log.info(
+            "Market data fetched: %d/%d tickers via %s in %.2fs",
+            len(histories),
+            len(tickers),
+            source,
+            time.perf_counter() - fetch_t0,
+        )
+
+        scored_items: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for t in tickers:
             try:
-                market2, series = await self._limited(self._market.fetch_and_analyze(t))
+                pts = histories.get(str(t).strip().upper()) or []
+                if len(pts) < 2:
+                    failures.append({"ticker": t, "error": "no_history"})
+                    continue
+                closes = [p.close for p in pts]
+                highs = [p.high for p in pts]
+                lows = [p.low for p in pts]
+                vols = [p.volume for p in pts]
+                market2 = self._market._analyze_from_ohlcv(  # noqa: SLF001 (internal helper is OK here)
+                    t, source=source, closes=closes, highs=highs, lows=lows, volumes=vols
+                )
                 if market2.get("error"):
-                    return {"ticker": t, "error": str(market2.get("error"))}
-                closes = series.get("closes") or []
+                    failures.append({"ticker": t, "error": str(market2.get("error"))})
+                    continue
                 signals = self._signals.analyze(closes, market=market2)
                 scored = _score_and_reasons(market=market2, signals=signals)
-                score = float(scored["score"])
-                reasons = list(scored["reasons"])
                 trade_plan = self._risk.plan_trade(
                     cash_usd=cash_usd,
                     entry_price=market2.get("last_close"),
@@ -187,36 +208,26 @@ class MarketScanService:
                     stop_atr_multiple=self._settings.stop_atr_multiple,
                     min_position_usd=self._settings.min_position_usd,
                 )
-                return {
-                    "ticker": t,
-                    "score": score,
-                    "reasons": reasons,
-                    "rating": scored.get("rating"),
-                    "mechanisms": scored.get("mechanisms") or [],
-                    "market": market2,
-                    "signals": signals,
-                    "trade_plan": trade_plan,
-                }
-            except httpx.HTTPStatusError as e:
-                host = e.request.url.host if e.request else "unknown_host"
-                code = e.response.status_code if e.response else "unknown_status"
-                return {"ticker": t, "error": f"http_status:{code} host:{host}"}
-            except httpx.TimeoutException:
-                return {"ticker": t, "error": "http_timeout"}
-            except httpx.HTTPError as e:
-                return {"ticker": t, "error": f"http_error:{e.__class__.__name__}"}
+                scored_items.append(
+                    {
+                        "ticker": t,
+                        "score": float(scored["score"]),
+                        "reasons": list(scored["reasons"]),
+                        "rating": scored.get("rating"),
+                        "mechanisms": scored.get("mechanisms") or [],
+                        "market": market2,
+                        "signals": signals,
+                        "trade_plan": trade_plan,
+                    }
+                )
             except Exception as e:
-                return {"ticker": t, "error": f"unexpected_error:{e.__class__.__name__}"}
+                failures.append({"ticker": t, "error": f"unexpected_error:{e.__class__.__name__}"})
 
-        items = await asyncio.gather(*(one(t) for t in tickers))
-        successes = [x for x in items if not x.get("error")]
-        failures = [x for x in items if x.get("error")]
-        items2 = successes
-        items2.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+        scored_items.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
 
         top_n = int(max(1, self._settings.marketscan_top_n))
         min_score = float(self._settings.marketscan_min_score)
-        ranked = items2[:top_n]
+        ranked = scored_items[:top_n]
         candidates = [x for x in ranked if float(x.get("score") or 0.0) >= min_score]
 
         if self._recs is not None:
@@ -235,7 +246,7 @@ class MarketScanService:
             "generated_at": _utcnow_iso(),
             "universe_source": uni.get("source"),
             "universe_size": len(tickers),
-            "scored_size": len(items2),
+            "scored_size": len(scored_items),
             "failed_size": len(failures),
             "errors_sample": failures[:8],
             "top_n": top_n,
@@ -246,9 +257,17 @@ class MarketScanService:
 
     async def run_and_persist(self, *, scan_id: UUID) -> None:
         await db.mark_market_running(self._settings.db_path, scan_id)
+        t0 = time.perf_counter()
         try:
             result = await self.run(scan_id=scan_id)
             await db.set_market_result(self._settings.db_path, scan_id, result)
+            self._log.info(
+                "Market scan completed: %d tickers in %.1fs, %d candidates, %d failed",
+                int(result.get("universe_size") or 0),
+                time.perf_counter() - t0,
+                int(len(result.get("candidates") or [])),
+                int(result.get("failed_size") or 0),
+            )
         except Exception as e:
             await db.set_market_failed(self._settings.db_path, scan_id, f"{e.__class__.__name__}: {e}")
 

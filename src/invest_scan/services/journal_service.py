@@ -45,7 +45,7 @@ class JournalService:
     ) -> None:
         self._settings = settings
         self._portfolio = portfolio
-        self._market = MarketDataAgent(http)
+        self._market = MarketDataAgent(http, finnhub_api_key=settings.finnhub_api_key)
 
     async def summary(self) -> dict[str, Any]:
         initial_budget = float(self._settings.initial_budget)

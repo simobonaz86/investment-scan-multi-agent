@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
-
-import httpx
 
 from invest_scan.agents.market_data_agent import MarketDataAgent
 from invest_scan.settings import Settings
@@ -12,17 +9,11 @@ from invest_scan.services.universe_service import UniverseService
 
 
 class RankingService:
-    def __init__(self, *, settings: Settings, http: httpx.AsyncClient, universe: UniverseService) -> None:
+    def __init__(self, *, settings: Settings, http, universe: UniverseService) -> None:
         self._settings = settings
-        self._http = http
-        self._market = MarketDataAgent(http)
+        self._market = MarketDataAgent(http, finnhub_api_key=settings.finnhub_api_key)
         self._universe = universe
-        self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
         self._cache: TTLCache[str, dict[str, Any]] = TTLCache(ttl_seconds=3600)
-
-    async def _limited(self, coro):
-        async with self._sem:
-            return await coro
 
     async def sp500_weekly(self, *, max_tickers: int = 200) -> dict[str, Any]:
         key = f"sp500_weekly:{max_tickers}"
@@ -37,18 +28,34 @@ class RankingService:
             self._cache.set(key, result)
             return result
 
-        async def one(t: str) -> tuple[str, float | None]:
-            try:
-                market = await self._limited(self._market.analyze(t))
-                r1w = market.get("return_1w")
-                return t, (float(r1w) if isinstance(r1w, (int, float)) else None)
-            except httpx.HTTPError:
-                return t, None
-            except Exception:
-                return t, None
+        try:
+            histories, source = await self._market.fetch_histories(
+                tickers, period="30d", attempts=2, backoff_seconds=1.0
+            )
+        except Exception:
+            histories, source = {}, "none"
 
-        pairs = await asyncio.gather(*(one(t) for t in tickers))
-        scored = [(t, r) for (t, r) in pairs if r is not None]
+        scored: list[tuple[str, float]] = []
+        for t in tickers:
+            pts = histories.get(str(t).strip().upper()) or []
+            if len(pts) < 6:
+                continue
+            closes = [p.close for p in pts]
+            try:
+                market = self._market._analyze_from_ohlcv(  # noqa: SLF001
+                    t,
+                    source=source,
+                    closes=closes,
+                    highs=[p.high for p in pts],
+                    lows=[p.low for p in pts],
+                    volumes=[p.volume for p in pts],
+                )
+                r1w = market.get("return_1w")
+                if isinstance(r1w, (int, float)):
+                    scored.append((t, float(r1w)))
+            except Exception:
+                continue
+
         scored.sort(key=lambda x: x[1], reverse=True)
 
         items: list[dict[str, Any]] = []

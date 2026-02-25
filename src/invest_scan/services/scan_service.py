@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -30,9 +31,10 @@ class ScanService:
         self._settings = settings
         self._http = http
         self._portfolio = portfolio_service
+        self._log = logging.getLogger(__name__)
 
         self._sem = asyncio.Semaphore(settings.max_concurrent_fetches)
-        self._market = MarketDataAgent(http)
+        self._market = MarketDataAgent(http, finnhub_api_key=settings.finnhub_api_key)
         self._news = NewsAgent(http, max_items=settings.max_news_items)
         self._signals = SignalsAgent()
         self._risk = RiskAgent()
@@ -65,6 +67,7 @@ class ScanService:
         return news
 
     async def scan_once(self, request: dict[str, Any]) -> dict[str, Any]:
+        t0 = datetime.now(timezone.utc)
         tickers = request.get("tickers") or []
         tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
         tickers = list(dict.fromkeys(tickers))[:30]
@@ -110,6 +113,13 @@ class ScanService:
                 return {"ticker": ticker, "error": f"unexpected_error: {e.__class__.__name__}"}
 
         reports = await asyncio.gather(*(one(t) for t in tickers))
+        failed = sum(1 for r in reports if r.get("error"))
+        self._log.info(
+            "Scan completed: %d tickers in %.2fs, %d failed",
+            len(tickers),
+            (datetime.now(timezone.utc) - t0).total_seconds(),
+            failed,
+        )
 
         return {
             "generated_at": _utcnow_iso(),

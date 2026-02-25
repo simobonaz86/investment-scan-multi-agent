@@ -13,6 +13,9 @@ dependencies = [
   "aiosqlite>=0.20",
   "feedparser>=6.0",
   "python-multipart>=0.0.9",
+  "yfinance>=0.2",
+  "pandas>=2.0",
+  "finnhub-python>=2.4",
 ]
 
 [project.optional-dependencies]
