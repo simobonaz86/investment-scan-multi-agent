@@ -54,20 +54,37 @@ class JournalService:
 
         # Price open positions using last_close (fallback to avg_price).
         positions_value = 0.0
-        for pos in p.positions:
+        pos_list = list(p.positions or [])
+        pos_tickers = [
+            str(pos.get("ticker") or "").strip().upper()
+            for pos in pos_list
+            if str(pos.get("ticker") or "").strip()
+        ]
+        pos_tickers = list(dict.fromkeys([t for t in pos_tickers if t]))
+        histories: dict[str, Any] = {}
+        if pos_tickers:
+            try:
+                histories, _src = await self._market.fetch_histories(
+                    pos_tickers, period="30d", attempts=2, backoff_seconds=1.0
+                )
+            except Exception:
+                histories = {}
+
+        last_close_by_ticker: dict[str, float] = {}
+        for t in pos_tickers:
+            pts = histories.get(t) or []
+            if pts:
+                last_close_by_ticker[t] = float(pts[-1].close)
+
+        for pos in pos_list:
             t = str(pos.get("ticker") or "").strip().upper()
             qty = float(pos.get("quantity") or 0.0)
             if not t or qty <= 0:
                 continue
-            try:
-                m = await self._market.analyze(t)
-                px = float(m.get("last_close") or 0.0)
-                if px > 0:
-                    positions_value += qty * px
-                else:
-                    avg = float(pos.get("avg_price") or 0.0)
-                    positions_value += qty * avg
-            except Exception:
+            px = float(last_close_by_ticker.get(t) or 0.0)
+            if px > 0:
+                positions_value += qty * px
+            else:
                 avg = float(pos.get("avg_price") or 0.0)
                 positions_value += qty * avg
 

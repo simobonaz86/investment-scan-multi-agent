@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,11 +24,25 @@ from invest_scan.services.trade_service import TradeService
 from invest_scan.services.universe_service import UniverseService
 
 
+def _configure_logging() -> None:
+    # Uvicorn's default logging config doesn't always enable app module INFO logs.
+    root = logging.getLogger()
+    if root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+    if not root.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+
+
 def create_app(
     *,
     settings_obj: Settings = settings,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
+    _configure_logging()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await db.init_db(settings_obj.db_path)

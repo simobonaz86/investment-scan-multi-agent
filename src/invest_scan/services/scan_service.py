@@ -79,12 +79,38 @@ class ScanService:
             except Exception:
                 cash_usd = None
 
+        # Batch fetch market data once (avoids N separate downloads).
+        histories, source = await self._market.fetch_histories(
+            tickers, period="120d", attempts=2, backoff_seconds=1.0
+        )
+        market_by_ticker: dict[str, dict[str, Any]] = {}
+        series_by_ticker: dict[str, dict[str, list[float]]] = {}
+        for t in tickers:
+            pts = histories.get(str(t).strip().upper()) or []
+            closes = [p.close for p in pts]
+            highs = [p.high for p in pts]
+            lows = [p.low for p in pts]
+            vols = [p.volume for p in pts]
+            market = self._market._analyze_from_ohlcv(  # noqa: SLF001
+                t, source=source, closes=closes, highs=highs, lows=lows, volumes=vols
+            )
+            market_by_ticker[t] = market
+            series_by_ticker[t] = {"closes": closes, "highs": highs, "lows": lows, "volumes": vols}
+
         async def one(ticker: str) -> dict[str, Any]:
             try:
-                market_task = asyncio.create_task(self._get_market(ticker))
                 news_task = asyncio.create_task(self._get_news(ticker))
 
-                market, series = await market_task
+                market = market_by_ticker.get(ticker) or {"ticker": ticker, "source": source, "error": "no_history"}
+                if market.get("error"):
+                    hint = str(market.get("error"))
+                    if hint in {"no_history", "insufficient_history"}:
+                        hint = (
+                            f"{hint} (if non-US ticker, use Yahoo suffix like VUAA.L / VUAA.MI / 5J50.DE)"
+                        )
+                    return {"ticker": ticker, "error": hint}
+
+                series = series_by_ticker.get(ticker) or {"closes": [], "highs": [], "lows": [], "volumes": []}
                 closes = series.get("closes") or []
                 signals = self._signals.analyze(closes, market=market)
                 risk = self._risk.score(volatility_60d_ann=market.get("volatility_60d_ann"))

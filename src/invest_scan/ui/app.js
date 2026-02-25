@@ -37,7 +37,7 @@ function showFatal(msg) {
 async function apiJson(path, opts = {}) {
   const headers = opts.body instanceof FormData ? {} : { "content-type": "application/json" };
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timeoutMs = 15000;
+  const timeoutMs = 30000;
   const fetchPromise = fetch(path, {
     headers: { ...headers, ...(opts.headers || {}) },
     ...opts,

@@ -300,6 +300,31 @@ class MarketDataAgent:
 
         return out
 
+    async def _fetch_histories_yfinance_chunked(
+        self,
+        tickers: list[str],
+        *,
+        period: str = "60d",
+        chunk_size: int = 50,
+    ) -> dict[str, list[MarketHistoryPoint]]:
+        tickers2 = [str(t).strip().upper() for t in tickers if str(t).strip()]
+        tickers2 = list(dict.fromkeys(tickers2))
+        if not tickers2:
+            return {}
+        if len(tickers2) <= chunk_size:
+            return await self._fetch_histories_yfinance_batch(tickers2, period=period)
+
+        out: dict[str, list[MarketHistoryPoint]] = {}
+        for i in range(0, len(tickers2), chunk_size):
+            chunk = tickers2[i : i + chunk_size]
+            try:
+                part = await self._fetch_histories_yfinance_batch(chunk, period=period)
+                out.update(part)
+            except Exception as e:
+                self._log.warning("yfinance chunk failed (%d-%d/%d): %s", i, i + len(chunk), len(tickers2), e)
+                continue
+        return out
+
     async def _fetch_history_finnhub(self, ticker: str) -> list[MarketHistoryPoint]:
         if not self._finnhub_api_key:
             return []
@@ -375,7 +400,7 @@ class MarketDataAgent:
         for attempt in range(attempts):
             try:
                 t0 = time.perf_counter()
-                out = await self._fetch_histories_yfinance_batch(tickers2, period=period)
+                out = await self._fetch_histories_yfinance_chunked(tickers2, period=period, chunk_size=50)
                 if out:
                     providers_used.add("yfinance")
                     self._log.info(
@@ -393,8 +418,19 @@ class MarketDataAgent:
 
         missing = [t for t in tickers2 if t not in out]
 
+        # Never attempt per-ticker fallbacks for huge batches: it can stall the whole API.
+        if missing and len(missing) > 40 and len(tickers2) > 60:
+            self._log.warning(
+                "Too many tickers missing after yfinance (%d/%d). Skipping per-ticker fallbacks.",
+                len(missing),
+                len(tickers2),
+            )
+            if last_exc is not None:
+                return {}, "yfinance_failed"
+            return out, "yfinance_partial" if out else "yfinance_empty"
+
         # Fallback: Finnhub per-ticker (only if configured) for missing tickers.
-        if missing and self._finnhub_api_key:
+        if missing and self._finnhub_api_key and len(missing) <= 25:
             for t in list(missing):
                 for attempt in range(attempts):
                     try:
@@ -410,7 +446,7 @@ class MarketDataAgent:
             missing = [t for t in tickers2 if t not in out]
 
         # Final fallback: Yahoo chart per-ticker (no auth) for missing tickers.
-        if missing:
+        if missing and len(missing) <= 25:
             for t in list(missing):
                 for attempt in range(attempts):
                     try:
