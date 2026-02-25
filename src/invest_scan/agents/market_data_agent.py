@@ -91,6 +91,12 @@ def _atr(highs: list[float], lows: list[float], closes: list[float], period: int
 class MarketDataAgent:
     def __init__(self, http: httpx.AsyncClient) -> None:
         self._http = http
+        self._stooq_base_urls = (
+            "https://stooq.com",
+            "http://stooq.com",
+            "https://stooq.pl",
+            "http://stooq.pl",
+        )
 
     def _analyze_from_ohlcv(
         self,
@@ -147,13 +153,32 @@ class MarketDataAgent:
         if not sym:
             return []
 
-        url = "https://stooq.com/q/d/l/"
         params = {"s": sym, "i": "d"}
-        resp = await self._http.get(url, params=params)
-        resp.raise_for_status()
+        timeout = httpx.Timeout(8.0, connect=3.0)
+        last_exc: Exception | None = None
+        text: str | None = None
+        ct: str = ""
 
-        ct = (resp.headers.get("content-type") or "").lower()
-        text = resp.text.strip()
+        for base in self._stooq_base_urls:
+            url = f"{base}/q/d/l/"
+            try:
+                resp = await self._http.get(url, params=params, timeout=timeout)
+                resp.raise_for_status()
+                ct = (resp.headers.get("content-type") or "").lower()
+                text = resp.text.strip()
+                break
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError, httpx.NetworkError) as e:
+                last_exc = e
+                continue
+            except httpx.HTTPError as e:
+                last_exc = e
+                continue
+
+        if text is None:
+            if last_exc is not None:
+                raise last_exc
+            return []
+
         if "text/html" in ct or text.lstrip().startswith("<"):
             raise ValueError("stooq_unexpected_html_response")
         if not text or text.lower().startswith("error"):

@@ -18,6 +18,8 @@ async def test_marketscan_includes_error_samples_when_stooq_returns_html(tmp_pat
             return httpx.Response(200, text=universe_csv)
         if request.url.host == "stooq.com" and request.url.path == "/q/d/l/":
             return httpx.Response(200, headers={"content-type": "text/html"}, text=html)
+        if request.url.host == "stooq.pl" and request.url.path == "/q/d/l/":
+            return httpx.Response(200, headers={"content-type": "text/html"}, text=html)
         return httpx.Response(404, text="not found")
 
     app = create_app(
