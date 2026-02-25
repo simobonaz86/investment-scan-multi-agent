@@ -8,7 +8,7 @@ from uuid import UUID
 
 from invest_scan import db
 
-from invest_scan.agents import MarketDataAgent, RiskAgent, SignalsAgent
+from invest_scan.agents import MarketDataAgent, RiskAgent, SignalsAgent, TickerDiscoveryAgent
 from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.recommendation_service import RecommendationService
 from invest_scan.services.universe_service import UniverseService
@@ -155,14 +155,40 @@ class MarketScanService:
 
         self._log = logging.getLogger(__name__)
         self._market = MarketDataAgent(http, finnhub_api_key=settings.finnhub_api_key)
+        self._discovery = TickerDiscoveryAgent(http=http, settings=settings)
         self._signals = SignalsAgent()
         self._risk = RiskAgent()
+
+    async def discover_tickers(self, *, limit: int | None = None) -> dict[str, Any]:
+        uni = await self._universe.get_universe()
+        base = list(uni.get("tickers") or [])
+        base = base[: int(self._settings.sp500_ranking_max_tickers)]
+        want = int(limit or self._settings.sp500_ranking_max_tickers)
+        want = int(max(1, min(want, self._settings.sp500_ranking_max_tickers, self._settings.ticker_discovery_max_tickers)))
+        disc = await self._discovery.discover(base_tickers=base, max_tickers=want)
+        disc["universe_source"] = uni.get("source")
+        disc["requested_limit"] = want
+        disc["tickers_preview"] = list(disc.get("tickers") or [])[:25]
+        return disc
 
     async def run(self, *, scan_id: UUID) -> dict[str, Any]:
         t0 = time.perf_counter()
         uni = await self._universe.get_universe()
-        tickers = list(uni.get("tickers") or [])
-        tickers = tickers[: int(self._settings.sp500_ranking_max_tickers)]
+        base = list(uni.get("tickers") or [])
+        base = base[: int(self._settings.sp500_ranking_max_tickers)]
+        disc = await self._discovery.discover(
+            base_tickers=base,
+            max_tickers=int(
+                max(
+                    1,
+                    min(
+                        self._settings.sp500_ranking_max_tickers,
+                        self._settings.ticker_discovery_max_tickers,
+                    ),
+                )
+            ),
+        )
+        tickers = list(disc.get("tickers") or [])
 
         cash_usd = (await self._portfolio.get_portfolio()).cash_usd
         self._log.info("Market scan start: %d tickers", len(tickers))
@@ -246,6 +272,15 @@ class MarketScanService:
             "generated_at": _utcnow_iso(),
             "universe_source": uni.get("source"),
             "universe_size": len(tickers),
+            "discovery": {
+                "enabled": bool(disc.get("enabled")),
+                "strategy": disc.get("strategy"),
+                "screeners": disc.get("screeners") or [],
+                "base_universe_size": disc.get("base_universe_size"),
+                "raw_size": disc.get("raw_size"),
+                "discovered_size": disc.get("discovered_size"),
+                "tickers_preview": list(disc.get("tickers") or [])[:25],
+            },
             "scored_size": len(scored_items),
             "failed_size": len(failures),
             "errors_sample": failures[:8],

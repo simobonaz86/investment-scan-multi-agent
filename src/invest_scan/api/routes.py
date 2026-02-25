@@ -166,6 +166,11 @@ async def universe(request: Request) -> dict[str, Any]:
     return await request.app.state.universe_service.get_universe()
 
 
+@router.get("/tickers/discover")
+async def tickers_discover(request: Request, limit: int = 200) -> dict[str, Any]:
+    return await request.app.state.market_scan_service.discover_tickers(limit=limit)
+
+
 
 @router.get("/portfolio")
 async def get_portfolio(request: Request) -> dict[str, Any]:

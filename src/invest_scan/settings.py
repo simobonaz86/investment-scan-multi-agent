@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     universe_yahoo_screener_id: str = "most_actives"
     universe_yahoo_screener_count: int = 250
 
+    # Ticker discovery (build a dynamic subset of the universe to scan)
+    ticker_discovery_enabled: bool = True
+    ticker_discovery_screener_ids_csv: str = "most_actives,day_gainers"
+    ticker_discovery_count_per_screener: int = 250
+    ticker_discovery_max_tickers: int = 200
+
     # Ranking: rolling 1-week return (5 trading days), can run any day.
     sp500_weekly_ranking_enabled: bool = True
     sp500_ranking_max_tickers: int = 200
