@@ -113,15 +113,13 @@ async def market_scan_loop(app: FastAPI) -> None:
 
 async def intraday_loop(app: FastAPI) -> None:
     settings: Settings = app.state.settings
-    if not getattr(settings, "intraday_enabled", False):
-        return
-
     mh = _market_hours(settings)
-    interval = max(30, int(getattr(settings, "intraday_poll_seconds", 180)))
 
     while True:
         try:
-            if (not getattr(settings, "intraday_only_market_hours", True)) or mh.is_open_now():
+            enabled = bool(getattr(settings, "intraday_enabled", False))
+            interval = max(30, int(getattr(settings, "intraday_poll_seconds", 180)))
+            if enabled and ((not getattr(settings, "intraday_only_market_hours", True)) or mh.is_open_now()):
                 try:
                     await app.state.intraday_service.refresh_watchlist()
                 except Exception:

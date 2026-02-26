@@ -178,6 +178,17 @@ async def init_db(db_path: str) -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_intraday_watchlist_score ON intraday_watchlist(score)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_intraday_watchlist_status ON intraday_watchlist(status)")
 
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_app_config_updated_at ON app_config(updated_at)")
+
         # Lightweight migrations for existing deployments
         await _ensure_column(db, table="recommendations", column="rating", column_def="TEXT")
         await _ensure_column(db, table="recommendations", column="mechanisms", column_def="TEXT")

@@ -21,6 +21,7 @@ from invest_scan.services.portfolio_service import PortfolioService
 from invest_scan.services.ranking_service import RankingService
 from invest_scan.services.scan_service import ScanService
 from invest_scan.services.recommendation_service import RecommendationService
+from invest_scan.services.config_service import ConfigService
 from invest_scan.services.trade_service import TradeService
 from invest_scan.services.universe_service import UniverseService
 
@@ -60,6 +61,11 @@ def create_app(
         )
         app.state.settings = settings_obj
         app.state.http = http
+        app.state.config_service = ConfigService(settings=settings_obj)
+        try:
+            await app.state.config_service.apply_runtime_overrides()
+        except Exception:
+            pass
         app.state.portfolio_service = PortfolioService(settings=settings_obj)
         app.state.trade_service = TradeService(settings=settings_obj)
         app.state.recommendation_service = RecommendationService(

@@ -428,3 +428,47 @@ async def api_intraday_watchlist(request: Request, limit: int = 20, refresh: boo
         items = await svc.get_watchlist(limit=limit)
     return {"items": items}
 
+
+@router.get("/api/config/intraday")
+async def api_get_intraday_config(request: Request) -> dict[str, Any]:
+    s = request.app.state.settings
+    cfg = await request.app.state.config_service.get_intraday_config()
+    return {
+        "effective": {
+            "enabled": bool(s.intraday_enabled),
+            "only_market_hours": bool(s.intraday_only_market_hours),
+            "interval": str(s.intraday_interval),
+            "period": str(s.intraday_period),
+            "watchlist_size": int(s.intraday_watchlist_size),
+            "poll_seconds": int(s.intraday_poll_seconds),
+        },
+        "stored": None
+        if cfg is None
+        else {
+            "enabled": bool(cfg.enabled),
+            "only_market_hours": bool(cfg.only_market_hours),
+            "interval": str(cfg.interval),
+            "period": str(cfg.period),
+            "watchlist_size": int(cfg.watchlist_size),
+            "poll_seconds": int(cfg.poll_seconds),
+            "updated_at": cfg.updated_at,
+        },
+    }
+
+
+@router.post("/api/config/intraday")
+async def api_set_intraday_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    cfg = await request.app.state.config_service.set_intraday_config(patch=body or {})
+    return {
+        "ok": True,
+        "saved": {
+            "enabled": bool(cfg.enabled),
+            "only_market_hours": bool(cfg.only_market_hours),
+            "interval": str(cfg.interval),
+            "period": str(cfg.period),
+            "watchlist_size": int(cfg.watchlist_size),
+            "poll_seconds": int(cfg.poll_seconds),
+            "updated_at": cfg.updated_at,
+        },
+    }
+

@@ -906,6 +906,64 @@ function setTab(tab) {
   localStorage.setItem("activeTab", tab);
 }
 
+async function loadIntradayConfig() {
+  const box = el("configStatus");
+  box.style.display = "none";
+  try {
+    const cfg = await apiJson("/api/config/intraday");
+    const eff = cfg.effective || {};
+    el("cfgIntradayEnabled").value = String(eff.enabled);
+    el("cfgIntradayOnlyMH").value = String(eff.only_market_hours);
+    el("cfgIntradayInterval").value = String(eff.interval || "15m");
+    el("cfgIntradayPeriod").value = String(eff.period || "5d");
+    el("cfgIntradayWatchlist").value = String(eff.watchlist_size == null ? 20 : eff.watchlist_size);
+    el("cfgIntradayPoll").value = String(eff.poll_seconds == null ? 180 : eff.poll_seconds);
+    const stored = cfg.stored;
+    box.style.display = "";
+    box.innerHTML = `<pre>Effective intraday config loaded.${stored && stored.updated_at ? `\nSaved: ${stored.updated_at}` : "\nSaved: (env defaults)"}</pre>`;
+  } catch (e) {
+    box.style.display = "";
+    box.innerHTML = `<pre>Failed to load config: ${escapeHtml(e.message || String(e))}</pre>`;
+  }
+}
+
+async function saveIntradayConfig() {
+  const box = el("configStatus");
+  box.style.display = "none";
+  const body = {
+    enabled: el("cfgIntradayEnabled").value === "true",
+    only_market_hours: el("cfgIntradayOnlyMH").value === "true",
+    interval: el("cfgIntradayInterval").value,
+    period: el("cfgIntradayPeriod").value,
+    watchlist_size: parseInt(el("cfgIntradayWatchlist").value || "20", 10),
+    poll_seconds: parseInt(el("cfgIntradayPoll").value || "180", 10),
+  };
+  try {
+    const res = await apiJson("/api/config/intraday", { method: "POST", body: JSON.stringify(body) });
+    box.style.display = "";
+    box.innerHTML = `<pre>Saved.\nUpdated: ${escapeHtml((res.saved && res.saved.updated_at) || "")}</pre>`;
+    state.dashboardAt = 0;
+  } catch (e) {
+    box.style.display = "";
+    box.innerHTML = `<pre>Save failed: ${escapeHtml(e.message || String(e))}</pre>`;
+  }
+}
+
+async function refreshIntradayNow() {
+  const box = el("configStatus");
+  box.style.display = "none";
+  try {
+    await apiJson("/api/intraday/watchlist?refresh=true");
+    box.style.display = "";
+    box.innerHTML = `<pre>Intraday refresh requested.</pre>`;
+    state.dashboardAt = 0;
+    await refreshVisible({ force: true });
+  } catch (e) {
+    box.style.display = "";
+    box.innerHTML = `<pre>Intraday refresh failed: ${escapeHtml(e.message || String(e))}</pre>`;
+  }
+}
+
 async function refreshVisible({ force = false } = {}) {
   let dash;
   try {
@@ -952,6 +1010,7 @@ async function refreshVisible({ force = false } = {}) {
   if (tab === "positions") await loadPositions({ dashboard: dash, force });
   if (tab === "journal") await loadJournal({ dashboard: dash, force });
   if (tab === "sync") await loadPortfolio({ dashboard: dash });
+  if (tab === "config") await loadIntradayConfig();
   const serverTs = dash && dash.server_time_utc ? new Date(dash.server_time_utc) : new Date();
   el("lastUpdated").textContent = `Updated ${serverTs.toLocaleTimeString()}`;
 }
@@ -1122,6 +1181,9 @@ async function main() {
   el("refreshJournalBtn").addEventListener("click", () => refreshVisible().catch((e) => alert(e.message)));
   el("setCashBtn").addEventListener("click", () => setCash().catch((e) => alert(e.message)));
   el("uploadCsvBtn").addEventListener("click", () => uploadCsv().catch((e) => alert(e.message)));
+  el("refreshConfigBtn").addEventListener("click", () => loadIntradayConfig().catch((e) => alert(e.message)));
+  el("saveConfigBtn").addEventListener("click", () => saveIntradayConfig().catch((e) => alert(e.message)));
+  el("refreshIntradayNowBtn").addEventListener("click", () => refreshIntradayNow().catch((e) => alert(e.message)));
 
   setTab(localStorage.getItem("activeTab") || "signals");
   setSignalsMode(localStorage.getItem("signalsMode") || "active");
