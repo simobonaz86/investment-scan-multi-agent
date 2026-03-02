@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Investment Scan Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2026-02-25-4" />
+    <link rel="stylesheet" href="/static/styles.css?v=2026-02-25-5" />
   </head>
   <body>
     <header class="topbar">
@@ -202,6 +202,44 @@
           <button id="saveConfigBtn" class="btn" type="button">Save</button>
           <button id="refreshIntradayNowBtn" class="btn btn-secondary" type="button">Refresh intraday now</button>
         </div>
+
+        <div style="height: 14px"></div>
+        <div class="pill">Portfolio (tactical sleeve)</div>
+        <div class="help">Used to size recommendations. Default sleeve is 1% of total portfolio.</div>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Total portfolio (USD)</label>
+            <input id="cfgTotalPortfolio" class="input" type="number" step="0.01" inputmode="decimal" value="0" />
+          </div>
+          <div class="grow">
+            <label class="label">Sleeve %</label>
+            <input id="cfgSleevePct" class="input" type="number" step="0.01" inputmode="decimal" value="1.0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Max positions</label>
+            <input id="cfgMaxPositions" class="input" type="number" step="1" inputmode="numeric" value="4" />
+          </div>
+          <div class="grow">
+            <label class="label">Risk per trade % (of sleeve)</label>
+            <input id="cfgRiskPct" class="input" type="number" step="0.1" inputmode="decimal" value="1.0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="grow">
+            <label class="label">Max position % (of sleeve)</label>
+            <input id="cfgMaxPosPct" class="input" type="number" step="1" inputmode="decimal" value="35" />
+          </div>
+          <div class="grow">
+            <label class="label">&nbsp;</label>
+            <button id="savePortfolioConfigBtn" class="btn" type="button">Save portfolio settings</button>
+          </div>
+        </div>
+        <div class="row">
+          <button id="refreshPlanBtn" class="btn btn-secondary" type="button">Refresh plan</button>
+        </div>
+        <div id="planBox" class="box">Plan will appear here.</div>
       </section>
     </main>
 
@@ -220,6 +258,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=2026-02-25-4"></script>
+    <script src="/static/app.js?v=2026-02-25-5"></script>
   </body>
 </html>

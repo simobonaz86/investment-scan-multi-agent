@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     intraday_watchlist_size: int = 20
     intraday_poll_seconds: int = 180
 
+    # Short-horizon portfolio (tactical sleeve)
+    total_portfolio_usd: float = 0.0
+    tactical_sleeve_pct: float = 0.01  # start at 1% until confidence increases
+    tactical_max_positions: int = 4
+    tactical_risk_per_trade_pct: float = 0.01  # of sleeve value
+    tactical_max_position_pct: float = 0.35  # of sleeve value per position
+
 
 settings = Settings()
 

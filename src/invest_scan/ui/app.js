@@ -964,6 +964,64 @@ async function refreshIntradayNow() {
   }
 }
 
+async function loadPortfolioConfig() {
+  try {
+    const cfg = await apiJson("/api/config/portfolio");
+    const eff = cfg.effective || {};
+    el("cfgTotalPortfolio").value = String(eff.total_portfolio_usd == null ? 0 : eff.total_portfolio_usd);
+    el("cfgSleevePct").value = String(((Number(eff.sleeve_pct || 0.01) * 100).toFixed(2)));
+    el("cfgMaxPositions").value = String(eff.max_positions == null ? 4 : eff.max_positions);
+    el("cfgRiskPct").value = String(((Number(eff.risk_per_trade_pct || 0.01) * 100).toFixed(2)));
+    el("cfgMaxPosPct").value = String(((Number(eff.max_position_pct || 0.35) * 100).toFixed(2)));
+  } catch {
+    // ignore
+  }
+}
+
+async function savePortfolioConfig() {
+  const total = parseFloat(el("cfgTotalPortfolio").value || "0");
+  const sleevePct = parseFloat(el("cfgSleevePct").value || "1");
+  const maxPos = parseInt(el("cfgMaxPositions").value || "4", 10);
+  const riskPct = parseFloat(el("cfgRiskPct").value || "1");
+  const maxPosPct = parseFloat(el("cfgMaxPosPct").value || "35");
+  const body = {
+    total_portfolio_usd: total,
+    sleeve_pct: sleevePct / 100.0,
+    max_positions: maxPos,
+    risk_per_trade_pct: riskPct / 100.0,
+    max_position_pct: maxPosPct / 100.0,
+  };
+  try {
+    await apiJson("/api/config/portfolio", { method: "POST", body: JSON.stringify(body) });
+    await refreshPlan();
+  } catch (e) {
+    const box = el("planBox");
+    box.innerHTML = `<pre>Save failed: ${escapeHtml(e.message || String(e))}</pre>`;
+  }
+}
+
+async function refreshPlan() {
+  const box = el("planBox");
+  box.textContent = "Loading plan…";
+  try {
+    const plan = await apiJson("/api/portfolio/plan");
+    if (!plan.ok) {
+      box.innerHTML = `<pre>Plan not available: ${escapeHtml(plan.error || "unknown")}\n\nSet Total portfolio USD in Config.</pre>`;
+      return;
+    }
+    const lines = plan.lines || [];
+    const rows = lines
+      .map((x) => {
+        const st = x.trigger_status || "WAITING";
+        return `${x.ticker} | ${st} | shares=${x.shares} | entry=${fmtMoney(x.entry)} | stop=${fmtMoney(x.stop)} | take=${fmtMoney(x.take)} | notional=${fmtMoney(x.notional_usd)} | risk=${fmtMoney(x.risk_usd)}`;
+      })
+      .join("\n");
+    box.innerHTML = `<pre>Sleeve: ${fmtMoney(plan.sleeve_value_usd)} (${(Number(plan.sleeve_pct) * 100).toFixed(2)}%)\nAllocated: ${fmtMoney(plan.allocated_usd)}\nRisk/trade: ${fmtMoney(plan.risk_per_trade_usd)}\n\n${rows || "No eligible TRIGGERED/WAITING recommendations yet."}</pre>`;
+  } catch (e) {
+    box.innerHTML = `<pre>Failed to load plan: ${escapeHtml(e.message || String(e))}</pre>`;
+  }
+}
+
 async function refreshVisible({ force = false } = {}) {
   let dash;
   try {
@@ -1011,6 +1069,10 @@ async function refreshVisible({ force = false } = {}) {
   if (tab === "journal") await loadJournal({ dashboard: dash, force });
   if (tab === "sync") await loadPortfolio({ dashboard: dash });
   if (tab === "config") await loadIntradayConfig();
+  if (tab === "config") {
+    await loadPortfolioConfig();
+    await refreshPlan();
+  }
   const serverTs = dash && dash.server_time_utc ? new Date(dash.server_time_utc) : new Date();
   el("lastUpdated").textContent = `Updated ${serverTs.toLocaleTimeString()}`;
 }
@@ -1184,6 +1246,8 @@ async function main() {
   el("refreshConfigBtn").addEventListener("click", () => loadIntradayConfig().catch((e) => alert(e.message)));
   el("saveConfigBtn").addEventListener("click", () => saveIntradayConfig().catch((e) => alert(e.message)));
   el("refreshIntradayNowBtn").addEventListener("click", () => refreshIntradayNow().catch((e) => alert(e.message)));
+  el("savePortfolioConfigBtn").addEventListener("click", () => savePortfolioConfig().catch((e) => alert(e.message)));
+  el("refreshPlanBtn").addEventListener("click", () => refreshPlan().catch((e) => alert(e.message)));
 
   setTab(localStorage.getItem("activeTab") || "signals");
   setSignalsMode(localStorage.getItem("signalsMode") || "active");

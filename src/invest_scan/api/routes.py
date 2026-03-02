@@ -20,6 +20,7 @@ from invest_scan.models import (
     TradeCloseRequest,
     TradeExecuteRequest,
 )
+from invest_scan.services.portfolio_agent import ShortHorizonPortfolioAgent
 from invest_scan.services.scan_service import scan_record_from_row
 
 
@@ -380,6 +381,17 @@ async def api_dashboard(
         except Exception:
             return []
 
+    async def portfolio_plan():
+        try:
+            recs = await request.app.state.recommendation_service.list(status="active", limit=200)
+            iw = await request.app.state.intraday_service.get_watchlist(
+                limit=int(max(1, request.app.state.settings.intraday_watchlist_size))
+            )
+            agent = ShortHorizonPortfolioAgent(settings=request.app.state.settings)
+            return agent.build_plan(recommendations=recs, intraday_watchlist=iw)
+        except Exception:
+            return {"ok": False, "error": "portfolio_plan_failed", "lines": []}
+
     (
         p,
         js,
@@ -391,6 +403,7 @@ async def api_dashboard(
         msst,
         msl,
         iw,
+        pp,
     ) = await asyncio.gather(
         portfolio(),
         journal_summary(),
@@ -402,6 +415,7 @@ async def api_dashboard(
         marketscan_status_obj(),
         latest_marketscan(),
         intraday_watchlist(),
+        portfolio_plan(),
     )
 
     return {
@@ -415,6 +429,7 @@ async def api_dashboard(
         "marketscan_status": msst,
         "marketscan_latest": msl,
         "intraday_watchlist": iw,
+        "portfolio_plan": pp,
         "server_time_utc": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -427,6 +442,16 @@ async def api_intraday_watchlist(request: Request, limit: int = 20, refresh: boo
     else:
         items = await svc.get_watchlist(limit=limit)
     return {"items": items}
+
+
+@router.get("/api/portfolio/plan")
+async def api_portfolio_plan(request: Request) -> dict[str, Any]:
+    recs = await request.app.state.recommendation_service.list(status="active", limit=250)
+    iw = await request.app.state.intraday_service.get_watchlist(
+        limit=int(max(1, request.app.state.settings.intraday_watchlist_size))
+    )
+    agent = ShortHorizonPortfolioAgent(settings=request.app.state.settings)
+    return agent.build_plan(recommendations=recs, intraday_watchlist=iw)
 
 
 @router.get("/api/config/intraday")
@@ -468,6 +493,47 @@ async def api_set_intraday_config(request: Request, body: dict[str, Any]) -> dic
             "period": str(cfg.period),
             "watchlist_size": int(cfg.watchlist_size),
             "poll_seconds": int(cfg.poll_seconds),
+            "updated_at": cfg.updated_at,
+        },
+    }
+
+
+@router.get("/api/config/portfolio")
+async def api_get_portfolio_config(request: Request) -> dict[str, Any]:
+    s = request.app.state.settings
+    cfg = await request.app.state.config_service.get_portfolio_config()
+    return {
+        "effective": {
+            "total_portfolio_usd": float(s.total_portfolio_usd or 0.0),
+            "sleeve_pct": float(s.tactical_sleeve_pct or 0.01),
+            "max_positions": int(s.tactical_max_positions or 4),
+            "risk_per_trade_pct": float(s.tactical_risk_per_trade_pct or 0.01),
+            "max_position_pct": float(s.tactical_max_position_pct or 0.35),
+        },
+        "stored": None
+        if cfg is None
+        else {
+            "total_portfolio_usd": float(cfg.total_portfolio_usd),
+            "sleeve_pct": float(cfg.sleeve_pct),
+            "max_positions": int(cfg.max_positions),
+            "risk_per_trade_pct": float(cfg.risk_per_trade_pct),
+            "max_position_pct": float(cfg.max_position_pct),
+            "updated_at": cfg.updated_at,
+        },
+    }
+
+
+@router.post("/api/config/portfolio")
+async def api_set_portfolio_config(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    cfg = await request.app.state.config_service.set_portfolio_config(patch=body or {})
+    return {
+        "ok": True,
+        "saved": {
+            "total_portfolio_usd": float(cfg.total_portfolio_usd),
+            "sleeve_pct": float(cfg.sleeve_pct),
+            "max_positions": int(cfg.max_positions),
+            "risk_per_trade_pct": float(cfg.risk_per_trade_pct),
+            "max_position_pct": float(cfg.max_position_pct),
             "updated_at": cfg.updated_at,
         },
     }
